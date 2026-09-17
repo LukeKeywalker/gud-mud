@@ -82,9 +82,12 @@ ASCII map, 1 char = 1 tile (0.25 m):
 - **Visible set** for a player = own room + all adjacent rooms. *All* entities
   in visible rooms are seen — no per-tile raycast in MVP. This matches the EoB
   room-grid look, is cheap at 10k, and is deterministic.
-- **Wire world spec:** the `welcome` message carries the static world blob —
-  5-bit tile codes (0=wall, 1–20=room index, 21=doorway), room rects, NPC
-  routes, author's initial tile. The client reconstructs a local `WorldState`
+- **Wire world spec:** the `welcome` message carries the static world blob:
+  5-bit tile codes (0=wall, 1–20=room index, 21=doorway), room rects
+  (u16 x, y, w, h per room), NPC routes (u8 len, then i16 x, i16 y per route
+  tile), and a prop list (u8 count, then per prop: u8 kind, i16 x, i16 y).
+  The joining player's start tile/yaw are separate `welcome` fields (§5), not
+  part of the blob. The client reconstructs a local `WorldState`
   through the *same* `build_world(spec)` the server uses, so both sides hold
   byte-identical static data.
 - Props (decorative meshes: crates, skeletons, the smoking-cabinet) are
@@ -137,7 +140,7 @@ Max frame guard: 64 KB (server drops connection with `0x20 reason=3` above it).
 | `0x04` | resync_req (C→S) | — |
 | `0x10` | state (S→C) | u32 tick, u32 ack_seq, u16 total_connected, u16 op_count, ops… |
 | `0x11` | resync (S→C) | u32 tick, u32 ack_seq, u16 total_connected, u16 op_count, ops… (full visible-set snapshot) |
-| `0x20` | kick (S→C) | u8 reason (0=congestion, 1=world_full, 2=shutdown, 3=oversized_frame), u8 msg_len, utf8 msg |
+| `0x20` | kick (S→C) | u8 reason (0=congestion, 1=reserved, 2=shutdown, 3=oversized_frame), u8 msg_len, utf8 msg |
 | `0x21` | error (S→C, non-fatal) | u8 reason (0=name_in_use, 1=bad_name, 2=other), u8 msg_len, utf8 msg |
 
 Ops:
@@ -177,8 +180,9 @@ Ops:
   3. `game_core.step(world, tick, inputs)` → events.
   4. Update room-grid spatial index on moved entities.
   5. Per player: diff current visible set vs last tick → ops:
-     `spawn` (newly visible or first time in a visible room), `move`, `yaw`
-     (only when yaw16 changed), `despawn` (left visible rooms or disconnected).
+     `spawn` (entity newly appears in this player's visible set this tick),
+     `move`, `yaw` (only when yaw16 changed), `despawn` (left the visible set
+     or disconnected).
   6. Visible-set cap: **max 128 entities per player**, deterministic pick
      (room-graph distance from player's room, then entity id). This is the
      insurance against the one-crowded-room O(n²) encoding blowup.
@@ -233,9 +237,11 @@ CREATE TABLE worlds (
 );
 ```
 
-- **Startup:** load all rows into in-memory `WorldState`. If the DB is empty,
-  seed from `maps/starter.txt` + the default patrolling NPC (id 65000) and set
-  `worlds` row `version=1`.
+- **Startup:** load all rows into in-memory `WorldState`. `worlds.id` is the
+  `world_id` used in `join`; the MVP world row is `id=0`. If the DB is empty,
+  seed it with the world row (id 0, canonical spec from `maps/starter.txt`)
+  plus the default patrolling NPC row (id 65000); `players` stays empty
+  (players appear on first join).
 - **Dirty save:** every 30 s, save only rows flagged dirty (tile/room change).
   Yaw-only changes do **not** dirty (avoids flag churn). On disconnect: forced
   full-row save of that player. Best-effort flush on orderly shutdown.
@@ -267,10 +273,11 @@ CREATE TABLE worlds (
      replicated locally via `npc_tile_at`).
 - **Other players / NPCs:** 2-sample interpolation buffer rendered at 60 fps
   (≈1 tick of render delay) so 20 Hz updates look smooth.
-- **Resync trigger:** `unacked > 5` (~250 ms), or self-prediction mismatch
-  `> 2 tiles`, or a rejected prediction the local core can't explain → send
-  `0x04 resync_req` → server `0x11 resync` full snapshot → clear pending,
-  rebase.
+- **Resync trigger:** `unacked > 5` (~250 ms), or self-mismatch **after
+  reconciliation** still `> 2 tiles` (i.e. re-sim from the server op didn't
+  explain the divergence), or a local rejection the local core can't explain
+  (NPC/wall state the local `WorldState` doesn't agree with) → send `0x04
+  resync_req` → server `0x11 resync` full snapshot → clear pending, rebase.
 - **Rendering (EoB look):** `THREE.FogExp2` near-black; instanced stone walls
   with a generated brick texture; right-angled rooms from the world spec; one
   flickering warm `PointLight` at the camera (no shadows in MVP); colored
@@ -287,9 +294,10 @@ calls → 60 fps render/reconcile. `three.module.js` is vendored at a pinned rev
   128-entity visible cap**: nobody pays for the whole world, only their visible
   rooms, bounded by the cap.
 - **`loadtest/load.py`**: N synthetic WS clients (real connections, random walk
-  at 20 Hz). Ramp 1k → 10k (or to the machine's limit). Report p50/p99
-  input→ack latency, per-tick encode time, CPU, and egress MB/s. Names the
-  hardware.
+  at 20 Hz). Runs **on the host** (not in compose) against
+  `ws://localhost:8000/ws` via `make load`. Ramp 1k → 10k (or to the machine's
+  limit; flags to cap). Report p50/p99 input→ack latency, per-tick encode
+  time, CPU, and egress MB/s. Names the hardware.
 - **Expectation:** a single CPython process realistically shows its ceiling in
   the low thousands at full fidelity. The pre-built escape = **sharding**:
   `world_id` is already in `join` (always 0 in MVP), so the router + one
@@ -399,8 +407,9 @@ Changes made during brainstorming (all others kept as drafted):
 - **yaw16** (0–2047 steps/turn) defined as the wire encoding of facing.
 - **128-entity visible-set cap** (deterministic pick) + **congestion kick**
   added as the O(n²)/slow-client guards.
-- `welcome` carries a **5-bit tile-code world blob** + author start position;
-  the client rebuilds `WorldState` via the same `build_world`.
+- `welcome` carries a **5-bit tile-code world blob** (incl. prop list) + the
+  joining player's start position; the client rebuilds `WorldState` via the
+  same `build_world`.
 - `join` pre-bakes **`world_id`** (=0 in MVP) to keep the sharding path additive.
 - **Rejoin-restore** semantics for existing names made explicit; `name_in_use`
   error for currently-online names.
