@@ -487,18 +487,19 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run with no server — it must fail the expected way (failing test)**
 
-Run: `python3 deployment/scripts/ws_smoke.py http://127.0.0.1:18000`
+Run: `python3 deployment/scripts/ws_smoke.py http://127.0.0.1:18321`
 Expected: non-zero exit with `Connection refused` (nothing is listening yet) — proves the client actually attempts a real connection.
 
 - [ ] **Step 3: Start the real server without Postgres (its lifespan tolerates the store failure) and re-run (test passes)**
 
 Run (worktree root):
 ```bash
-nohup .venv/bin/python -m uvicorn mud_server.app:app --port 18000 >/tmp/mud-preflight.log 2>&1 &
-echo $! > /tmp/mud-preflight.pid
+mkdir -p .preflight
+nohup .venv/bin/python -m uvicorn mud_server.app:app --port 18321 >.preflight/uvicorn.log 2>&1 &
+echo $! > .preflight/uvicorn.pid
 sleep 3
-python3 deployment/scripts/ws_smoke.py http://127.0.0.1:18000; RC=$?
-kill "$(cat /tmp/mud-preflight.pid)"
+python3 deployment/scripts/ws_smoke.py http://127.0.0.1:18321; RC=$?
+kill "$(cat .preflight/uvicorn.pid)"
 exit $RC
 ```
 Expected: `JOINED pid=... name='smoke'` then `OK frames=~290` (20 Hz × 15 s state frames; any value > 0 passes).
@@ -507,12 +508,13 @@ Expected: `JOINED pid=... name='smoke'` then `OK frames=~290` (20 Hz × 15 s sta
 
 Run:
 ```bash
-nohup .venv/bin/python -m uvicorn mud_server.app:app --port 18000 >/tmp/mud-preflight.log 2>&1 &
-echo $! > /tmp/mud-preflight.pid
+mkdir -p .preflight
+nohup .venv/bin/python -m uvicorn mud_server.app:app --port 18321 >.preflight/uvicorn.log 2>&1 &
+echo $! > .preflight/uvicorn.pid
 sleep 3
-curl -fsS http://127.0.0.1:18000/healthz && echo
-curl -sI http://127.0.0.1:18000/ | head -1
-kill "$(cat /tmp/mud-preflight.pid)"
+curl -fsS http://127.0.0.1:18321/healthz && echo
+curl -sI http://127.0.0.1:18321/ | head -1
+kill "$(cat .preflight/uvicorn.pid)"
 ```
 Expected: a JSON line with `uptime_s`/`tick`/`connected`, and `HTTP/1.1 200 OK`.
 
