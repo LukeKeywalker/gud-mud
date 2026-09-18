@@ -3,7 +3,8 @@ from __future__ import annotations
 import struct
 
 from .constants import (
-    KICK_CONGESTION, MSG_JOIN, MSG_WELCOME, MSG_INPUT, MSG_STATE, MSG_RESYNC,
+    KICK_CONGESTION, MSG_JOIN, MSG_WELCOME, MSG_INPUT, MSG_RESYNC_REQ, MSG_STATE,
+    MSG_RESYNC,
     MSG_KICK, MSG_ERROR, OP_MOVE, OP_SPAWN, OP_DESPAWN, OP_YAW, FRAME_MAX,
 )
 from .world import RoomRect, NpcDef, PropDef, WorldSpec

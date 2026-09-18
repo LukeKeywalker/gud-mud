@@ -80,6 +80,12 @@ def test_state_roundtrip_all_ops():
     ]
 
 
+def test_resync_req_opcode_exposed():
+    # ws receive dispatch (server/src/mud_server/app.py) references
+    # P.MSG_RESYNC_REQ on the protocol module; it must be importable and == 4
+    assert getattr(P, "MSG_RESYNC_REQ", None) == 4
+
+
 def test_resync_kind():
     b = P.pack_resync(1, 0, 1, [P.pack_op_spawn(1, 1, 1, 1, 0, 1, "A")])
     kind, = (b[0],)
