@@ -22,4 +22,4 @@ logs:
 	docker compose logs -f --tail=100
 
 load:
-	docker compose exec -w /app/server server python -m loadtest.load $(LOAD_ARGS)
+	docker compose -f docker-compose.verify.yml exec -w /app/server server python -m loadtest.load $(LOAD_ARGS)

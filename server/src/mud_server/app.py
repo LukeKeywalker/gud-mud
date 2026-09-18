@@ -23,7 +23,7 @@ async def healthz(request):
         "tick": LOOP.t if LOOP else 0,
         "connected": _state["connected"],
         "queue_max": 32,
-        "bytes_out": _state["bytes_out"],
+        "bytes_out": LOOP.bytes_out if LOOP else 0,
     })
 
 
