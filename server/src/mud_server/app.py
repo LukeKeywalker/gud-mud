@@ -129,6 +129,10 @@ async def lifespan(_app):
     if store is not None:
         for pid, name, color, room, x, y, yaw in await store.load_players():
             g.stored_players[name] = (pid, color, room, x, y, yaw)
+        try:
+            await store.save_npcs(g.world)
+        except Exception:
+            pass
         await store.load_npcs_into(g.world)
     LOOP = g
     task = asyncio.create_task(g.run())

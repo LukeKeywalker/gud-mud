@@ -1,1 +1,32 @@
--- placeholder; real schema lands in the database task
+CREATE SEQUENCE IF NOT EXISTS pid_seq START 100;
+
+CREATE TABLE IF NOT EXISTS worlds (
+  id      SMALLINT PRIMARY KEY,
+  name    TEXT NOT NULL,
+  seed    BIGINT,
+  data    JSONB NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS players (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT UNIQUE NOT NULL,
+  color      INTEGER NOT NULL,
+  room       SMALLINT NOT NULL,
+  x          SMALLINT NOT NULL,
+  y          SMALLINT NOT NULL,
+  yaw        SMALLINT NOT NULL,
+  dirty      BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS npcs (
+  id         INTEGER PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  room       SMALLINT NOT NULL,
+  x          SMALLINT NOT NULL,
+  y          SMALLINT NOT NULL,
+  data       JSONB NOT NULL,
+  dirty      BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
