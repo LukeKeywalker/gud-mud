@@ -76,6 +76,16 @@ async def test_new_player_reserved_and_saved_on_release():
     assert "Bob" in store.players
 
 
+async def test_dirty_excludes_npcs_but_keeps_humans():
+    store = FakeStore()
+    loop = GameLoop(make_spec(), store=store)
+    c = await join_client(loop, "Bob")
+    await loop.tick()
+    pids = [t[0] for t in loop._dirty]
+    assert 65000 not in pids
+    assert c.pid in pids
+
+
 def test_spec_json_roundtrip():
     from conftest import make_spec
     spec = make_spec()
