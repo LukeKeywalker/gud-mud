@@ -43,7 +43,7 @@ class GameLoop:
                 self._save_at = time.monotonic() + 30.0
                 items = list(self._dirty)
                 self._dirty.clear()
-                await self.store.send_dirty(items)
+                await self.store.save_dirty(items)
             delay = self.tick_sec - (time.monotonic() - t0)
             if delay > 0:
                 await asyncio.sleep(delay)
