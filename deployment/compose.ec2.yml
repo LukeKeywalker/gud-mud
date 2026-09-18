@@ -1,0 +1,8 @@
+services:
+  db:
+    # never expose the database on the host
+    ports: []
+    restart: unless-stopped
+  server:
+    # host port 18000 (from docker-compose.yml) stays mapped - the ALB targets it
+    restart: unless-stopped
