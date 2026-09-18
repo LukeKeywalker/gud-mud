@@ -1,4 +1,5 @@
 import * as THREE from "./three.module.js";
+import { wallStone, floorStone, ceilStone } from "./texgen.js";
 
 const TICK_MS = 50;
 const TILE_M = 1.0;
@@ -73,16 +74,8 @@ async function bootCore(log, setProgress) {
 }
 
 // ---------- scene ----------
-function seededRnd(seed) {
-  let s = seed;
-  return () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) + 1e-9;
-}
-
-function makePixelTex(size, draw) {
-  const c = document.createElement("canvas");
-  c.width = c.height = size;
-  draw(c.getContext("2d"), size);
-  const t = new THREE.CanvasTexture(c);
+function wrapTexture(canvas) {
+  const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = THREE.SRGBColorSpace;
   t.magFilter = THREE.NearestFilter;
   t.minFilter = THREE.NearestFilter;
@@ -92,42 +85,9 @@ function makePixelTex(size, draw) {
 }
 
 function buildTextures() {
-  tex.wall = makePixelTex(16, (g, s) => {
-    const rnd = seededRnd(7);
-    g.fillStyle = "#241b13";
-    g.fillRect(0, 0, s, s);
-    for (let row = 0; row < 4; row++) {
-      const off = (row % 2) * 4;
-      for (let col = -2; col < 5; col++) {
-        const v = 52 + Math.floor(rnd() * 30);
-        g.fillStyle = "rgb(" + (v + 18) + "," + v + "," + (v - 12) + ")";
-        g.fillRect(col * 8 + off, row * 4, 7, 3);
-      }
-    }
-  });
-  tex.floor = makePixelTex(16, (g, s) => {
-    const rnd = seededRnd(21);
-    g.fillStyle = "#1e160d";
-    g.fillRect(0, 0, s, s);
-    for (let y = 0; y < 4; y++)
-      for (let x = 0; x < 4; x++) {
-        const v = 38 + Math.floor(rnd() * 20);
-        g.fillStyle = "rgb(" + (v + 12) + "," + v + "," + (v - 8) + ")";
-        g.fillRect(x * 4 + 1, y * 4 + 1, 3, 3);
-      }
-  });
-  tex.ceil = makePixelTex(16, (g, s) => {
-    const rnd = seededRnd(5);
-    g.fillStyle = "#1a130e";
-    g.fillRect(0, 0, s, s);
-    for (let x = 0; x < 4; x++) {
-      const v = 44 + Math.floor(rnd() * 16);
-      g.fillStyle = "rgb(" + (v + 14) + "," + v + "," + (v - 10) + ")";
-      g.fillRect(x * 4, 0, 3, s);
-    }
-    g.fillStyle = "#140e09";
-    g.fillRect(0, 0, s, 1);
-  });
+  tex.wall = wrapTexture(wallStone(7));
+  tex.floor = wrapTexture(floorStone(21));
+  tex.ceil = wrapTexture(ceilStone(5));
 }
 
 let bufW = 0, bufH = 0;
