@@ -1324,7 +1324,7 @@ def pack_tiles(codes) -> bytes:
 
 def unpack_tiles(n: int, raw: bytes) -> list[int]:
     v = int.from_bytes(raw, "big")
-    s = format(v, "0%db" % (5 * n))
+    s = format(v, "0%db" % (len(raw) * 8))
     return [int(s[i:i + 5], 2) for i in range(0, 5 * n, 5)]
 
 
@@ -1348,7 +1348,7 @@ def unpack_join(b: bytes):
 def pack_input(seq: int, dx: int, dy: int, yaw: int) -> bytes:
     if not (-1 <= dx <= 1 and -1 <= dy <= 1):
         raise ValueError("dx/dy must be in -1..1")
-    return bytes([MSG_INPUT]) + struct.pack(">IbbH", seq, dx, dy, yaw & 0x7FF)
+    return bytes([MSG_INPUT]) + struct.pack(">IbbH", seq, dx, dy, yaw)
 
 
 def unpack_input(b: bytes):
@@ -1356,7 +1356,10 @@ def unpack_input(b: bytes):
     k = r.u8()
     if k != MSG_INPUT:
         raise ValueError("not an input frame")
-    return r.u32(), r.i16(), r.i16(), r.u16()
+    seq = r.u32()
+    dx, dy = struct.unpack_from(">bb", r.b, r.i)
+    r.i += 2
+    return seq, dx, dy, r.u16()
 
 
 def pack_resync_req() -> bytes:
