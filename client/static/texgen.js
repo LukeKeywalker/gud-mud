@@ -83,26 +83,37 @@ export function wallStone(seed) {
     const ph = (row & 1) ? 32 : 0;
     const iy = y & 15;
     const ix = (x + ph) & 127;
-    if (iy < 2 || (ix & 63) < 2) {
+    const jx = ix & 63;
+    const blk = (ix >> 6) + row * 2;
+    const e0 = Math.min((jx - 1) / 10, (64 - jx) / 10, (iy - 1) / 4, (16 - iy) / 4);
+    const edge = Math.min(1, Math.max(0, e0));
+    let r, g, b;
+    if (iy < 2 || jx < 2) {
       const n = fbm(x * 0.3 + 31, y * 0.3 + 7, 2) * 5;
       const v = 21 + n;
-      return [clamp8(v + 4), clamp8(v + 1), clamp8(v + 5)];
+      r = v + 4; g = v + 1; b = v + 5;
+    } else {
+      const base = 46 + hashStone(blk, seed) * 34;
+      const hue = (hashStone(blk * 7 + 3, seed) - 0.5) * 16;
+      const w = fbm(iy * 0.05 + 12.7, jx * 0.05 + blk * 0.31, 2);
+      const gy = fbm((jx + w * 9) * 0.13, (iy + w * 9) * 0.13 + blk * 31.7, 4);
+      const mottle = fbm(jx * 0.047 + 3.1, iy * 0.047 + 8.8 + blk * 7.9, 3);
+      let v = base + gy * 17 + mottle * 10 + fbm(jx * 0.6 + blk * 11.3, iy * 0.6 - 5.1, 2) * 6;
+      const pit = fbm(jx * 0.9 + 55.5, iy * 0.9 - 22.2 + blk * 4.4, 2);
+      if (pit < -0.42) v += (pit + 0.42) * 95;
+      const k = 0.52 + 0.48 * edge * edge;
+      r = (v + 5 + hue) * k;
+      g = (v + 2 + hue * 0.45) * k;
+      b = (v + 6 - hue * 0.25) * k;
     }
-    const blk = (ix >> 6) + row * 2;
-    const base = 46 + hashStone(blk, seed) * 34;
-    const hue = (hashStone(blk * 7 + 3, seed) - 0.5) * 16;
-    const jx = ix & 63;
-    const w = fbm(iy * 0.05 + 12.7, jx * 0.05 + blk * 0.31, 2);
-    const gy = fbm((jx + w * 9) * 0.13, (iy + w * 9) * 0.13 + blk * 31.7, 4);
-    const mottle = fbm(jx * 0.047 + 3.1, iy * 0.047 + 8.8 + blk * 7.9, 3);
-    let v = base + gy * 17 + mottle * 10 + fbm(jx * 0.6 + blk * 11.3, iy * 0.6 - 5.1, 2) * 6;
-    const pit = fbm(jx * 0.9 + 55.5, iy * 0.9 - 22.2 + blk * 4.4, 2);
-    if (pit < -0.42) v += (pit + 0.42) * 95;
-    const dx = Math.min(jx - 1, 64 - jx);
-    const dy = Math.min(iy - 1, 16 - iy);
-    const edge = Math.min(1, dx / 10, dy / 4);
-    const k = 0.52 + 0.48 * edge * edge;
-    return [clamp8((v + 5 + hue) * k), clamp8((v + 2 + hue * 0.45) * k), clamp8((v + 6 - hue * 0.25) * k)];
+    const mfield = fbm(x * (4 / 128) + 71.3, y * (4 / 128) - 27.9, 3) + (hashStone(blk * 97 + 13, seed) - 0.5) * 0.4;
+    const cover = Math.min(1, Math.max(0, (mfield - 0.1) / 0.42));
+    const clump = 0.55 + 0.45 * (0.5 + 0.5 * fbm(x * (13 / 128) + 11.7, y * (13 / 128) + 52.1, 2));
+    const moss = cover * clump * (0.35 + 0.65 * Math.min(1, 1 - Math.min(0, e0)));
+    r *= 1 - 0.42 * moss;
+    g = g * (1 + 0.34 * moss) + 3 * moss;
+    b *= 1 - 0.46 * moss;
+    return [clamp8(r), clamp8(g), clamp8(b)];
   });
 }
 
