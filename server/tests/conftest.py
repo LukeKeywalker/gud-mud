@@ -6,11 +6,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "shared"))
 
+# 3-tile arch doorway in the middle column: 'a'/'d'/'a', only 'd' passable
 MAP = """\
 #########
+#AAAaBBB#
 #AAAdBBB#
-#AAAdBBB#
-#AAAdBBB#
+#AAAaBBB#
 #########"""
 
 def make_spec(npc: bool = True):

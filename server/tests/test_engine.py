@@ -105,8 +105,11 @@ def test_starter_map_integrity():
     assert letters == sorted("ABCDEFGHIJKLMNOPQRST")
     a = next(r for r in spec.rooms if r.letter == "A")
     assert (a.x, a.y) == (10, 10)
-    # every doorway touches exactly two distinct rooms
+    # every doorway touches exactly two distinct rooms and is a 3-tile arch run: 'a'/'d'/'a'
+    arches = 0
     for i, c in enumerate(spec.codes):
+        if c == 22:
+            arches += 1
         if c == 21:
             x, y = i % spec.width, i // spec.width
             around = set()
@@ -117,6 +120,12 @@ def test_starter_map_integrity():
                     if 1 <= rc <= 20:
                         around.add(rc)
             assert len(around) == 2, f"doorway at ({x},{y}) touches {around}"
+            horiz = spec.codes[y * spec.width + x - 1] == 22 and spec.codes[y * spec.width + x + 1] == 22
+            vert = spec.codes[(y - 1) * spec.width + x] == 22 and spec.codes[(y + 1) * spec.width + x] == 22
+            assert horiz or vert, f"doorway at ({x},{y}) has no arch flanks"
+    doors = spec.codes.count(21)
+    assert arches == 2 * doors
+    assert doors == 31
     assert len(spec.npcs) == 1
     assert spec.npcs[0].id == 65000
     assert len(spec.props) == 3

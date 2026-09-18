@@ -1,6 +1,7 @@
-"""Generate maps/starter.txt: 5 room-columns x 3 room-rows of 8x8 rooms,
-letters A..T as laid out below, single-tile doorways between all attached
-adjacent pairs (1 m wide at the client's 1 m/tile render scale)."""
+"""Generate maps/starter.txt: 5 room-columns x 4 room-rows of 8x8 rooms,
+letters A..T as laid out below, 3-tile stone-arch doorways ('a'/'d'/'a')
+between all attached adjacent pairs: 'd' is the only passable tile, the
+'a' flanks are see-through arch stonework at the client's 1 m/tile scale."""
 from pathlib import Path
 
 LETTERS = [
@@ -29,14 +30,16 @@ def gen() -> str:
         y = 1 + j * (ROOM_H + 1) + ROOM_H // 2
         for i in range(COLS - 1):
             x = 1 + i * (ROOM_W + 1) + ROOM_W
-            assert g[y][x] == "#"
-            g[y][x] = "d"
+            for dy, ch in ((-1, "a"), (0, "d"), (1, "a")):
+                assert g[y + dy][x] == "#"
+                g[y + dy][x] = ch
     for i in range(COLS):
         x = 1 + i * (ROOM_W + 1) + ROOM_W // 2
         for j in range(ROWS - 1):
             y = 1 + j * (ROOM_H + 1) + ROOM_H
-            assert g[y][x] == "#"
-            g[y][x] = "d"
+            for dx, ch in ((-1, "a"), (0, "d"), (1, "a")):
+                assert g[y][x + dx] == "#"
+                g[y][x + dx] = ch
     return "\n".join("".join(row) for row in g) + "\n"
 
 
@@ -46,7 +49,7 @@ def main() -> None:
     p.write_text(txt)
     rows = [r for r in txt.split("\n") if r]
     assert all(len(r) == len(rows[0]) for r in rows)
-    assert all(c in "#dABCDEFGHIJKLMNOPQRSTUVWXYZ" for r in rows for c in r)
+    assert all(c in "#daABCDEFGHIJKLMNOPQRSTUVWXYZ" for r in rows for c in r)
     print(txt)
     print("MAP_OK", len(rows[0]), "x", len(rows))
 

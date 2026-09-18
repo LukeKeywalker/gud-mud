@@ -15,6 +15,11 @@ NAME_MAX = 24
 
 TILE_WALL = 0
 TILE_DOOR = 21
+TILE_ARCH = 22
+
+# Bump when the saved world-scene JSON shape changes; stale rows are
+# dropped at boot and re-seeded from the map file.
+WORLD_SCENE_VERSION = 2
 
 MSG_JOIN = 1
 MSG_WELCOME = 2

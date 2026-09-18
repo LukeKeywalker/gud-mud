@@ -5,6 +5,7 @@ import time
 
 import asyncpg
 
+from game_core.constants import WORLD_SCENE_VERSION
 from .worldio import spec_from_json, spec_to_json
 
 
@@ -48,8 +49,12 @@ class PostgresStore:
     # ---- world -----------------------------------------------------------
 
     async def load_world_scene(self):
-        row = await self.pool.fetchrow("SELECT data FROM worlds WHERE id = 0")
+        row = await self.pool.fetchrow(
+            "SELECT data, version FROM worlds WHERE id = 0")
         if row is None:
+            return None
+        if row["version"] != WORLD_SCENE_VERSION:
+            await self.pool.execute("DELETE FROM worlds WHERE id = 0")
             return None
         data = row["data"]
         return data if isinstance(data, str) else json.dumps(data)
@@ -57,9 +62,10 @@ class PostgresStore:
     async def save_world_scene(self, scene_json: str) -> None:
         await self.pool.execute(
             """INSERT INTO worlds (id, name, seed, data, version)
-               VALUES (0, 'starter', NULL, $1, 1)
+               VALUES (0, 'starter', NULL, $1, $2)
                ON CONFLICT (id) DO NOTHING""",
             scene_json,
+            WORLD_SCENE_VERSION,
         )
 
     # ---- players ---------------------------------------------------------

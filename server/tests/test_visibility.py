@@ -16,7 +16,7 @@ def test_sees_adjacent_room(world):
 
 def test_doorway_viewer_sees_both_rooms(world):
     from game_core.visibility import visible_entities
-    viewer = _put(world, 4, 1, 111)
+    viewer = _put(world, 4, 2, 111)
     _put(world, 2, 2, 555)
     _put(world, 7, 2, 556)
     ids = [e.pid for e in visible_entities(world, viewer)]

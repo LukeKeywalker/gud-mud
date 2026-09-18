@@ -18,18 +18,31 @@ def test_adjacency_via_doorway(world):
 
 def test_walkability(world):
     assert world.is_walkable(2, 2)
-    assert world.is_walkable(4, 1)
+    assert world.is_walkable(4, 2)        # doorway middle is passable
+    assert not world.is_walkable(4, 1)    # arch flank is solid stone
+    assert not world.is_walkable(4, 3)    # arch flank is solid stone
     assert not world.is_walkable(0, 0)
     assert not world.is_walkable(9, 2)
 
 def test_room_index_of_tile(world):
     assert world.room_index_of_tile(2, 2) == 1
     assert world.room_index_of_tile(7, 2) == 2
-    assert world.room_index_of_tile(4, 1) == 2  # doorway resolves to max room touching it
+    assert world.room_index_of_tile(4, 2) == 2  # doorway resolves to max room touching it
 
 def test_visible_rooms_at(world):
     assert world.visible_rooms_at(2, 2) == frozenset({1, 2})
-    assert world.visible_rooms_at(4, 1) == frozenset({1, 2})
+    assert world.visible_rooms_at(4, 2) == frozenset({1, 2})  # doorway middle
+    assert world.visible_rooms_at(4, 1) == frozenset({1, 2})  # arch flank inherits the door's rooms
+
+def test_door_without_flanks_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        W.build_world(W.parse_map_text("#########\n#AAAdBBB#\n#AAAdBBB#\n#AAAdBBB#\n#########"))
+
+def test_orphan_arch_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        W.build_world(W.parse_map_text("a########\n#AAAaBBB#\n#AAAdBBB#\n#AAAaBBB#\n#########"))
 
 def test_state_hash_stable_and_sensitive(spec):
     h1 = W.state_hash(W.build_world(spec))

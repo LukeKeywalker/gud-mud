@@ -7,6 +7,12 @@ const EYE_H = 1.6;
 const RES_H = 216;
 const DITHER = true;
 const STEP_MS = 250;
+const ARCH_R = 1.5;       // half the 3-tile doorway span
+const ARCH_SPRING = 2.0;  // springline, ~2/3 of WALL_H
+const ARCH_RISE = 0.8;    // elliptical crown rise (crown at 2.8)
+const ARCH_EPS = 0.01;    // band inset, keeps faces off Z-coplanar wall/floor/ceiling
+const TILE_DOOR = 21;
+const TILE_ARCH = 22;
 const STEP_TWEEN_MS = 180;
 const ROT_TWEEN_MS = 150;
 const TAU = Math.PI * 2;
@@ -184,6 +190,49 @@ function initScene() {
   buildArenaGeometry();
 }
 
+// Stone round arch over a 3-tile doorway: a floating band between the
+// elliptical curve (springline 2.0 m, crown 2.8 m) and the wall top. The
+// lower 2 m of the span is a plain opening, so no floor geometry is
+// duplicated in doorway cells; the ARCH_EPS inset keeps the band off the
+// Z-coplanar planes of neighboring walls and the ceiling. Only the middle
+// tile is passable (arch flanks are walls in the core).
+function buildDoorArchGeos() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-ARCH_R, WALL_H);
+  shape.lineTo(ARCH_R, WALL_H);
+  shape.lineTo(ARCH_R, ARCH_SPRING);
+  shape.absellipse(0, ARCH_SPRING, ARCH_R, ARCH_RISE, 0, Math.PI, false);
+  shape.closePath();
+  const opt = { depth: TILE_M, bevelEnabled: false };
+  const spanX = new THREE.ExtrudeGeometry(shape, opt);           // span along three x, 1-tile thick along z
+  spanX.scale((ARCH_R - ARCH_EPS) / ARCH_R, 1, 1 - 2 * ARCH_EPS);
+  spanX.translate(0, -ARCH_EPS, 0);
+  const spanZ = new THREE.ExtrudeGeometry(shape, opt);
+  spanZ.rotateY(Math.PI / 2);                                    // span along three z, 1-tile thick along x
+  spanZ.scale(1 - 2 * ARCH_EPS, 1, (ARCH_R - ARCH_EPS) / ARCH_R);
+  spanZ.translate(0, -ARCH_EPS, 0);
+  return { spanX, spanZ };
+}
+
+function buildDoorArchMeshes(codes, w, h) {
+  const { spanX, spanZ } = buildDoorArchGeos();
+  const mat = new THREE.MeshStandardMaterial({ map: tex.wall, roughness: 0.95 });
+  const add = (geo, px, pz) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(px, 0, pz);
+    scene.add(mesh);
+  };
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      if (codes[y * w + x] !== TILE_DOOR) continue;
+      if (codes[y * w + x - 1] === TILE_ARCH && codes[y * w + x + 1] === TILE_ARCH) {
+        add(spanX, (x + 0.5) * TILE_M, (y + ARCH_EPS) * TILE_M);
+      } else if (codes[(y - 1) * w + x] === TILE_ARCH && codes[(y + 1) * w + x] === TILE_ARCH) {
+        add(spanZ, (x + ARCH_EPS) * TILE_M, (y + 0.5) * TILE_M);
+      }
+    }
+}
+
 function buildArenaGeometry() {
   if (selfId < 0 || !world) return;
   const w = world.spec.width, h = world.spec.height;
@@ -204,6 +253,7 @@ function buildArenaGeometry() {
   });
   mesh.instanceMatrix.needsUpdate = true;
   scene.add(mesh);
+  buildDoorArchMeshes(codes, w, h);
   const floorTex = tex.floor.clone();
   floorTex.repeat.set(w, h);
   const floor = new THREE.Mesh(

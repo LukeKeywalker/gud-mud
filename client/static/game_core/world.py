@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 
-from .constants import TILE_WALL, TILE_DOOR
+from .constants import TILE_WALL, TILE_DOOR, TILE_ARCH
 
 ROOM_MIN, ROOM_MAX = 1, 20
 
@@ -72,6 +72,8 @@ def parse_map_text(text: str) -> WorldSpec:
                 codes.append(TILE_WALL)
             elif ch == "d":
                 codes.append(TILE_DOOR)
+            elif ch == "a":
+                codes.append(TILE_ARCH)
             elif "A" <= ch <= "T":
                 r = ord(ch) - ord("A") + 1
                 codes.append(r)
@@ -125,8 +127,36 @@ class WorldState:
                         for b in around:
                             if a != b:
                                 adj[a].add(b)
+                elif c == TILE_ARCH:
+                    self.walls[y * self.w + x] = 1
                 else:
                     self.room_index[y * self.w + x] = c
+
+        def room_code(px: int, py: int) -> int:
+            if 0 <= px < self.w and 0 <= py < self.h:
+                rc = spec.codes[py * self.w + px]
+                return rc if ROOM_MIN <= rc <= ROOM_MAX else 0
+            return 0
+
+        for i in range(n):
+            if spec.codes[i] != TILE_DOOR:
+                continue
+            x, y = i % self.w, i // self.w
+            if room_code(x - 1, y) and room_code(x + 1, y):
+                flanks = ((y - 1) * self.w + x, (y + 1) * self.w + x)
+            elif room_code(x, y - 1) and room_code(x, y + 1):
+                flanks = (y * self.w + x - 1, y * self.w + x + 1)
+            else:
+                raise ValueError(f"doorway at ({x},{y}) does not border two rooms")
+            for f in flanks:
+                if spec.codes[f] != TILE_ARCH:
+                    raise ValueError(f"doorway at ({x},{y}) missing arch flank at ({f % self.w},{f // self.w})")
+                if self._tile_rooms[f]:
+                    raise ValueError(f"arch tile at ({f % self.w},{f // self.w}) shared by two doorways")
+                self._tile_rooms[f] = self._tile_rooms[i]
+        for i, c in enumerate(spec.codes):
+            if c == TILE_ARCH and not self._tile_rooms[i]:
+                raise ValueError(f"arch tile at ({i % self.w},{i // self.w}) belongs to no doorway")
         self.adj = {k: frozenset(v) for k, v in adj.items()}
         self.entities: dict[int, Entity] = {}
         self.entity_order: list[Entity] = []
@@ -156,7 +186,7 @@ class WorldState:
     def visible_rooms_at(self, x: int, y: int) -> frozenset:
         i = y * self.w + x
         c = self.spec.codes[i]
-        if c == TILE_DOOR:
+        if c == TILE_DOOR or c == TILE_ARCH:
             return self._tile_rooms[i]
         return frozenset({c}) | self.adj.get(c, frozenset())
 
