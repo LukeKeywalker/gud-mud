@@ -1622,6 +1622,7 @@ import { loadPyodide } from "pyodide";
 
 const payload = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const pyo = await loadPyodide();
+pyo.FS.mkdirTree("/mud/game_core");
 for (const [path, enc] of Object.entries(payload.files)) {
   pyo.FS.writeFile(path, Buffer.from(enc, "base64"));
 }
