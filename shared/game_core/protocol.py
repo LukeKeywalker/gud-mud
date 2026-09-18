@@ -116,7 +116,8 @@ def _pack_op_move(pid, x, y, room):
 
 def _pack_op_spawn(pid, x, y, room, yaw, color, name):
     nb = name.encode("utf-8")
-    return (bytes([OP_SPAWN]) + struct.pack(">HhhHhB", pid, x, y, room, yaw & 0x7FF, color)
+    return (bytes([OP_SPAWN]) + struct.pack(">HhhHh", pid, x, y, room, yaw & 0x7FF)
+            + color.to_bytes(3, "big")
             + struct.pack(">B", len(nb)) + nb)
 
 
@@ -140,7 +141,7 @@ def _read_op(r: Reader):
         return (OP_MOVE, r.u16(), r.i16(), r.i16(), r.u16())
     if k == OP_SPAWN:
         pid, x, y, room, yaw = r.u16(), r.i16(), r.i16(), r.u16(), r.u16()
-        color = r.u8()
+        color = int.from_bytes(r.take(3), "big")
         name = r.take(r.u8()).decode("utf-8")
         return (OP_SPAWN, pid, x, y, room, yaw, color, name)
     if k == OP_DESPAWN:
@@ -179,7 +180,7 @@ def unpack_state(b: bytes):
 def pack_welcome(self_id, tick, blob, color, sx, sy, sroom, syaw, name) -> bytes:
     nb = name.encode("utf-8")
     return (bytes([MSG_WELCOME]) + struct.pack(">IIH", self_id, tick, len(blob)) + blob
-            + struct.pack(">BhhHh", color, sx, sy, sroom, syaw)
+            + color.to_bytes(3, "big") + struct.pack(">hhHh", sx, sy, sroom, syaw)
             + struct.pack(">B", len(nb)) + nb)
 
 
@@ -190,7 +191,8 @@ def unpack_welcome(b: bytes):
         raise ValueError("not a welcome frame")
     self_id, tick = r.u32(), r.u32()
     blob = r.take(r.u16())
-    color, sx, sy, sroom, syaw = r.u8(), r.i16(), r.i16(), r.u16(), r.u16()
+    color = int.from_bytes(r.take(3), "big")
+    sx, sy, sroom, syaw = r.i16(), r.i16(), r.u16(), r.u16()
     name = r.take(r.u8()).decode("utf-8")
     return self_id, tick, blob, color, sx, sy, sroom, syaw, name
 
