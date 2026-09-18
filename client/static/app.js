@@ -382,17 +382,24 @@ function applyState(kind, tick, ack, connectedCt, ops) {
   if (selfId >= 0) {
     const me = known.get(selfId);
     if (me) {
-      const ddx = predPos[0] - me.x, ddy = predPos[1] - me.y;
-      if (ddx !== 0 || ddy !== 0) {
-        if (isResync || Math.abs(ddx) <= SNAP_TILES && Math.abs(ddy) <= SNAP_TILES) {
-          predPos = [me.x, me.y];
-          dispPos = [me.x, me.y];
-          pending.length = 0;
-          stepPending = null;
-          moveTw.on = false;
-        } else if (!resyncRequested) {
-          resyncRequested = true;
-          ws.send(toU8(core.protocol.pack_resync_req()));
+      if (isResync) {
+        predPos = [me.x, me.y];
+        dispPos = [me.x, me.y];
+      } else {
+        const ddx = predPos[0] - me.x, ddy = predPos[1] - me.y;
+        if (Math.abs(ddx) > SNAP_TILES || Math.abs(ddy) > SNAP_TILES) {
+          if (!resyncRequested) {
+            resyncRequested = true;
+            ws.send(toU8(core.protocol.pack_resync_req()));
+          }
+        } else {
+          let rx = me.x, ry = me.y, rt = localTick;
+          for (const p of pending) {
+            const r = core.moves.try_move_at(world, rx, ry, p.dx, p.dy, rt).toJs();
+            rx = r[0]; ry = r[1];
+            rt += 1;
+          }
+          predPos = [rx, ry];
         }
       }
     }
