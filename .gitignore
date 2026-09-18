@@ -9,3 +9,8 @@ server/tests/parity/node_modules/
 server/tests/parity/payload.json
 docker-compose.verify.yml
 devtools/shots/
+.worktrees/
+.cdk.staging/
+cdk.out/
+.cdk.pkl
+.preflight/
