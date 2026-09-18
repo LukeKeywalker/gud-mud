@@ -92,10 +92,12 @@ def test_starter_map_integrity():
     from mud_server.worldio import build_seed_spec
     p = Path(__file__).resolve().parents[2] / "maps" / "starter.txt"
     spec = build_seed_spec(p)
-    assert (spec.width, spec.height) == (16, 11)
-    assert len(spec.rooms) == 6
+    assert (spec.width, spec.height) == (26, 21)
+    assert len(spec.rooms) == 20
     letters = [r.letter for r in spec.rooms]
-    assert letters == ["A", "B", "C", "D", "E", "F"]
+    assert letters == sorted("ABCDEFGHIJKLMNOPQRST")
+    a = next(r for r in spec.rooms if r.letter == "A")
+    assert (a.x, a.y) == (6, 6)
     # every doorway touches exactly two distinct rooms
     for i, c in enumerate(spec.codes):
         if c == 21:
@@ -110,3 +112,4 @@ def test_starter_map_integrity():
             assert len(around) == 2, f"doorway at ({x},{y}) touches {around}"
     assert len(spec.npcs) == 1
     assert spec.npcs[0].id == 65000
+    assert len(spec.props) == 3

@@ -10,6 +10,8 @@ def build_seed_spec(path: Path) -> W.WorldSpec:
     spec = W.parse_map_text(text)
     a = next(r for r in spec.rooms if r.letter == "A")
     spec = W.add_npc(spec, W.NpcDef(65000, "warden", ((a.x + 1, a.y + 1), (a.x + 2, a.y + 1))))
+    for k, (px, py) in enumerate(((a.x + 1, a.y + 2), (a.x + 2, a.y + 2), (a.x + 1, a.y + 3))):
+        spec = W.add_prop(spec, W.PropDef(1, px, py))
     return spec
 
 

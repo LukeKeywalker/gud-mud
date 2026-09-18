@@ -77,7 +77,7 @@ function brickTexture() {
 function initScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050505);
-  scene.fog = new THREE.FogExp2(0x050505, 0.16);
+  scene.fog = new THREE.FogExp2(0x050505, 0.11);
   camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 60);
   renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
