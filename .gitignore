@@ -13,3 +13,5 @@ cdk.out/
 server/tests/parity/payload.json
 docker-compose.verify.yml
 devtools/shots/
+cdk.context.json
+.preflight/

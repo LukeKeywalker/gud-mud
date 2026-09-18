@@ -28,3 +28,29 @@ logs:
 
 load:
 	docker compose -f docker-compose.verify.yml exec -w /app/server server python -m loadtest.load $(LOAD_ARGS)
+
+.PHONY: deploy deploy-deps update destroy
+
+CDK_APP = deployment/.venv/bin/python3 deployment/app.py
+
+deploy: deploy-deps
+	cdk deploy MudDemo --app "$(CDK_APP)" --require-approval never
+
+deploy-deps:
+	bash -c 'test -d deployment/.venv || python3 -m venv deployment/.venv && deployment/.venv/bin/pip install -q -r deployment/requirements.txt'
+
+update:
+ifdef SHA
+	aws ssm send-command \
+		--instance-ids "$$(aws ec2 describe-instances --filters 'Name=tag:Name,Values=mud-game' --query 'Reservations[].Instances[].InstanceId' --output text)" \
+		--document-name 'AWS-RunShellScript' \
+		--parameters "{\"commands\":[\"bash /opt/mud/deployment/scripts/update.sh $(SHA)\"]}"
+else
+	aws ssm send-command \
+		--instance-ids "$$(aws ec2 describe-instances --filters 'Name=tag:Name,Values=mud-game' --query 'Reservations[].Instances[].InstanceId' --output text)" \
+		--document-name 'AWS-RunShellScript' \
+		--parameters '{"commands":["bash /opt/mud/deployment/scripts/update.sh"]}'
+endif
+
+destroy: deploy-deps
+	cdk destroy MudDemo --app "$(CDK_APP)"
