@@ -74,8 +74,8 @@ class GameLoop:
                 pid = self._next_pid
                 self._next_pid += 1
             a = next(r for r in self.spec.rooms if r.letter == "A")
-            x = a.x
-            y = a.y
+            x = a.x + a.w // 2
+            y = a.y + a.h // 2
             yaw = self._rng.randrange(2048)
             color = self._rng.choice(list(PALETTE))
         ent = W.Entity(pid, name, self.world.room_index_of_tile(x, y), x, y, yaw, color, False)

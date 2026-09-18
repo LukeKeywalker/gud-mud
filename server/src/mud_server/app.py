@@ -3,10 +3,25 @@ import time
 from contextlib import asynccontextmanager
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
+
+
+class NoCacheMidd(BaseHTTPMiddleware):
+    """Force revalidation for the mutable client files so a rebuild is never
+    shadowed by the browser's heuristic (etag/last-modified) cache."""
+
+    NO_CACHE_PATHS = {"/", "/index.html", "/app.js", "/styles.css", "/sw.js"}
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path in self.NO_CACHE_PATHS:
+            response.headers["cache-control"] = "no-cache"
+        return response
 
 from .config import CONFIG
 from .connections import Client
@@ -146,11 +161,15 @@ async def lifespan(_app):
 
 
 def create_app() -> Starlette:
-    return Starlette(lifespan=lifespan, routes=[
-        Route("/healthz", healthz),
-        WebSocketRoute("/ws", ws_handler),
-        Mount("/", StaticFiles(directory=CONFIG.static_dir, html=True), name="static"),
-    ])
+    return Starlette(
+        lifespan=lifespan,
+        middleware=[Middleware(NoCacheMidd)],
+        routes=[
+            Route("/healthz", healthz),
+            WebSocketRoute("/ws", ws_handler),
+            Mount("/", StaticFiles(directory=CONFIG.static_dir, html=True), name="static"),
+        ],
+    )
 
 
 app = create_app()

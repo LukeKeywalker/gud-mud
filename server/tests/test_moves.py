@@ -38,8 +38,10 @@ def test_npc_tile_at_ping_pong(world):
     from game_core.moves import npc_tile_at
     for i, n in enumerate(world.spec.npcs):
         assert npc_tile_at(n, 0) == (2, 1)
-        assert npc_tile_at(n, 1) == (3, 1)
+        assert npc_tile_at(n, 4) == (2, 1)
         assert npc_tile_at(n, 5) == (3, 1)
+        assert npc_tile_at(n, 9) == (3, 1)
+        assert npc_tile_at(n, 10) == (2, 1)
 
 
 def test_npc_blocks_target_next_tick(world):
@@ -53,9 +55,21 @@ def test_npc_blocks_target_next_tick(world):
 def test_npc_clear_allows(world):
     from game_core.moves import try_move
     e = put(world, 1, 1)
-    # npc at t+1==3 is (3,1), so (2,1) is free
-    assert try_move(world, e, 1, 0, 2) is True
+    # npc at t+1==9 is (3,1), so (2,1) is free
+    assert try_move(world, e, 1, 0, 8) is True
     assert (e.x, e.y) == (2, 1)
+
+
+def test_npc_walks_between_distant_waypoints():
+    import game_core.world as W
+    from game_core.moves import npc_tile_at
+    n = W.NpcDef(66001, "walker", ((2, 1), (5, 1)))
+    assert npc_tile_at(n, 0) == (2, 1)
+    assert npc_tile_at(n, 5) == (3, 1)
+    assert npc_tile_at(n, 10) == (4, 1)
+    assert npc_tile_at(n, 15) == (5, 1)
+    assert npc_tile_at(n, 20) == (4, 1)
+    assert npc_tile_at(n, 25) == (3, 1)
 
 
 def test_step_latest_seq_wins(world):

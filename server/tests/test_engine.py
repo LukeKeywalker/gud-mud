@@ -20,6 +20,13 @@ def _last(c):
     return P.unpack_state(c.ws.sent[-1])
 
 
+def _place(loop, ent, x, y):
+    room = loop.world.room_index_of_tile(x, y)
+    ent.x, ent.y, ent.room = x, y, room
+    for c in loop.clients.values():
+        c.known[ent.pid] = (x, y, room, ent.yaw)
+
+
 async def test_spawn_frame_three_entities():
     loop, a, b = await _start()
     kind, tick, ack, conn, ops = _last(b)
@@ -33,7 +40,7 @@ async def test_spawn_frame_three_entities():
 async def test_move_seen_by_other_and_acked():
     loop, a, b = await _start()
     assert 65000 in {op[1] for op in _last(a)[4] if op[0] == 1}  # sanity
-    a.ent.x, a.ent.y, a.ent.room = 1, 2, loop.world.room_index_of_tile(1, 2)
+    _place(loop, a.ent, 1, 2)
     a.q.put_nowait(M.InputFrame(a.pid, 1, 1, 0, 0))
     await loop.tick()
     await loop.flush(a)
@@ -46,7 +53,7 @@ async def test_move_seen_by_other_and_acked():
 
 async def test_npc_rejects_move_but_ack_advances():
     loop, a, b = await _start()
-    a.ent.x, a.ent.y, a.ent.room = 1, 1, loop.world.room_index_of_tile(1, 1)
+    _place(loop, a.ent, 1, 1)
     a.q.put_nowait(M.InputFrame(a.pid, 1, 1, 0, 0))
     await loop.tick()
     await loop.flush(a)
@@ -92,12 +99,12 @@ def test_starter_map_integrity():
     from mud_server.worldio import build_seed_spec
     p = Path(__file__).resolve().parents[2] / "maps" / "starter.txt"
     spec = build_seed_spec(p)
-    assert (spec.width, spec.height) == (26, 21)
+    assert (spec.width, spec.height) == (46, 37)
     assert len(spec.rooms) == 20
     letters = [r.letter for r in spec.rooms]
     assert letters == sorted("ABCDEFGHIJKLMNOPQRST")
     a = next(r for r in spec.rooms if r.letter == "A")
-    assert (a.x, a.y) == (6, 6)
+    assert (a.x, a.y) == (10, 10)
     # every doorway touches exactly two distinct rooms
     for i, c in enumerate(spec.codes):
         if c == 21:

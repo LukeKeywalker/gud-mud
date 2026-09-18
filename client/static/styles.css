@@ -1,5 +1,5 @@
 html, body { margin: 0; padding: 0; height: 100%; background: #050505; overflow: hidden; }
-#c { display: block; width: 100vw; height: 100vh; }
+#c { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; image-rendering: crisp-edges; }
 #hud {
   position: fixed; top: 10px; left: 12px; color: #d8c9a3;
   font: 13px/1.5 monospace; text-shadow: 0 1px 2px #000; pointer-events: none;

@@ -18,6 +18,11 @@ up: sync-client
 down:
 	docker compose down
 
+reseed: sync-client
+	docker compose down -v
+	docker compose build
+	docker compose up -d
+
 logs:
 	docker compose logs -f --tail=100
 

@@ -1,5 +1,6 @@
-"""Generate maps/starter.txt: 5 room-columns x 3 room-rows of 4x4 rooms,
-letters A..T as laid out below, doorways between all attached adjacent pairs."""
+"""Generate maps/starter.txt: 5 room-columns x 3 room-rows of 8x8 rooms,
+letters A..T as laid out below, single-tile doorways between all attached
+adjacent pairs (1 m wide at the client's 1 m/tile render scale)."""
 from pathlib import Path
 
 LETTERS = [
@@ -8,7 +9,7 @@ LETTERS = [
     ["K", "C", "D", "L", "R"],
     ["P", "I", "J", "S", "T"],
 ]
-ROOM_W = ROOM_H = 4
+ROOM_W = ROOM_H = 8
 
 
 def gen() -> str:

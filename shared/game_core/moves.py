@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .constants import OP_MOVE, OP_YAW
+from .constants import NPC_STEP_TICKS, OP_MOVE, OP_YAW
 from .world import NpcDef, Entity, WorldState
 
 
@@ -29,16 +29,32 @@ class EventYaw:
     yaw: int
 
 
+def _route_tiles(route) -> tuple:
+    pts = [tuple(route[0])]
+    for wp in route[1:]:
+        x, y = pts[-1]
+        tx, ty = wp
+        while (x, y) != (tx, ty):
+            if x != tx:
+                x += 1 if tx > x else -1
+            else:
+                y += 1 if ty > y else -1
+            pts.append((x, y))
+    return tuple(pts)
+
+
 def npc_tile_at(npc: NpcDef, tick: int) -> tuple[int, int]:
     route = list(npc.route)
-    L = len(route)
-    if L == 1:
+    if len(route) == 1:
         x, y = route[0]
         return x, y
-    span = L - 1
-    t = tick % (2 * span)
+    path = _route_tiles(route)
+    span = len(path) - 1
+    if span == 0:
+        return path[0]
+    t = (tick // NPC_STEP_TICKS) % (2 * span)
     i = t if t <= span else 2 * span - t
-    x, y = route[i]
+    x, y = path[i]
     return x, y
 
 
