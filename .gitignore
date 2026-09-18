@@ -13,4 +13,5 @@ devtools/shots/
 .cdk.staging/
 cdk.out/
 .cdk.pkl
+cdk.context.json
 .preflight/
