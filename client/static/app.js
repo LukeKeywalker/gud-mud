@@ -92,10 +92,11 @@ function initScene() {
   camera.add(torch);
   scene.add(camera);
   scene.add(new THREE.AmbientLight(0x39301f, 0.55));
-  buildGeometry();
+  buildArenaGeometry();
 }
 
-function buildGeometry() {
+function buildArenaGeometry() {
+  if (selfId < 0 || !world) return;
   const w = world.spec.width, h = world.spec.height;
   const codes = world.spec.codes.toJs();
   const walls = [];
@@ -121,6 +122,17 @@ function buildGeometry() {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((w * TILE_M) / 2, 0, (h * TILE_M) / 2);
   scene.add(floor);
+  const WALL_H = 1.0;
+  const wallMat = new THREE.MeshBasicMaterial({ color: 0x2a241c, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+  const addWall = (gw, gz, px, pz) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(gw, WALL_H, gz), wallMat);
+    b.position.set(px, WALL_H / 2, pz);
+    scene.add(b);
+  };
+  addWall(w * TILE_M, 0.1, (w * TILE_M) / 2, 0);
+  addWall(w * TILE_M, 0.1, (w * TILE_M) / 2, h * TILE_M);
+  addWall(0.1, h * TILE_M, 0, (h * TILE_M) / 2);
+  addWall(0.1, h * TILE_M, w * TILE_M, (h * TILE_M) / 2);
   const props = world.spec.props.toJs();
   for (const pr of props) {
     const kind = pr.kind, x = pr.x, y = pr.y;
@@ -192,6 +204,7 @@ function wireSocket() {
       pyodide.globals.set("mud_blob", b64(blob));
       pyodide.runPython("import base64; mud_blob = base64.b64decode(mud_blob)");
       world = pyodide.runPython("game_core.world.build_world(game_core.protocol.unpack_world_blob(mud_blob))");
+      buildArenaGeometry();
     } else if (k === 16 || k === 17) {
       const r = core.protocol.unpack_state(toPyBytes(u8)).toJs();
       applyState(r[0], r[1], r[2], r[3], r[4]);
