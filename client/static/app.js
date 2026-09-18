@@ -204,12 +204,28 @@ function buildDoorArchGeos() {
   shape.absellipse(0, ARCH_SPRING, ARCH_R, ARCH_RISE, 0, Math.PI, false);
   shape.closePath();
   const opt = { depth: TILE_M, bevelEnabled: false };
+  const s = (ARCH_R - ARCH_EPS) / ARCH_R;
+  // Match the wall boxes' UV scheme (each 1x3 face maps u=world_x mod 1,
+  // v=y/WALL_H) so the stone pattern is continuous across door arches.
+  // Every door center sits on a half-integer tile, so the 0.5 phase is
+  // constant for all doors and can be baked into the shared geometry.
+  const bake = (g, ufn) => {
+    const p = g.attributes.position;
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      uv[i * 2] = ufn(p.getX(i));
+      uv[i * 2 + 1] = (p.getY(i) - ARCH_EPS) / WALL_H;
+    }
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  };
   const spanX = new THREE.ExtrudeGeometry(shape, opt);           // span along three x, 1-tile thick along z
-  spanX.scale((ARCH_R - ARCH_EPS) / ARCH_R, 1, 1 - 2 * ARCH_EPS);
+  bake(spanX, (x) => 0.5 + s * x);
+  spanX.scale(s, 1, 1 - 2 * ARCH_EPS);
   spanX.translate(0, -ARCH_EPS, 0);
   const spanZ = new THREE.ExtrudeGeometry(shape, opt);
+  bake(spanZ, (x) => 0.5 - s * x);                               // span maps to -z after rotateY
   spanZ.rotateY(Math.PI / 2);                                    // span along three z, 1-tile thick along x
-  spanZ.scale(1 - 2 * ARCH_EPS, 1, (ARCH_R - ARCH_EPS) / ARCH_R);
+  spanZ.scale(1 - 2 * ARCH_EPS, 1, s);
   spanZ.translate(0, -ARCH_EPS, 0);
   return { spanX, spanZ };
 }
