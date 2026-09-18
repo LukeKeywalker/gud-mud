@@ -7,14 +7,15 @@ const WALL_H = 3.0;
 const EYE_H = 1.6;
 const RES_H = 216;
 const DITHER = true;
-const STEP_MS = 250;
+const STEP_MS = 308;  // step period (walk slowed 1.5x); gap between steps = STEP_MS - STEP_TWEEN_MS
 const ARCH_R = 1.5;       // half the 3-tile doorway span
 const ARCH_SPRING = 2.0;  // springline, ~2/3 of WALL_H
 const ARCH_RISE = 0.8;    // elliptical crown rise (crown at 2.8)
 const ARCH_EPS = 0.01;    // band inset, keeps faces off Z-coplanar wall/floor/ceiling
 const TILE_DOOR = 21;
 const TILE_ARCH = 22;
-const STEP_TWEEN_MS = 180;
+const STEP_TWEEN_MS = 290;
+const WALK_BOB_AMP = 0.05;  // head-bob height per step, Doom-style
 const ROT_TWEEN_MS = 150;
 const TAU = Math.PI * 2;
 const FACE_DIRS = [[0, -1], [-1, 0], [0, 1], [1, 0]];
@@ -514,17 +515,18 @@ function render(now) {
     yaw = rotTw.from + (rotTw.to - rotTw.from) * e;
     if (t >= 1) { yaw = rotTw.to; rotTw.on = false; }
   }
+  let bobY = 0;
   if (moveTw.on) {
     const t = Math.min(1, (now - moveTw.t0) / STEP_TWEEN_MS);
-    const e = 1 - Math.pow(1 - t, 3);
-    dispPos[0] = moveTw.fx + (moveTw.tx - moveTw.fx) * e;
-    dispPos[1] = moveTw.fy + (moveTw.ty - moveTw.fy) * e;
+    dispPos[0] = moveTw.fx + (moveTw.tx - moveTw.fx) * t;
+    dispPos[1] = moveTw.fy + (moveTw.ty - moveTw.fy) * t;
+    bobY = WALK_BOB_AMP * (1 - Math.cos(t * TAU)) / 2;
     if (t >= 1) { dispPos[0] = moveTw.tx; dispPos[1] = moveTw.ty; moveTw.on = false; }
   } else {
     dispPos[0] += (predPos[0] - dispPos[0]) * Math.min(1, dt * 14);
     dispPos[1] += (predPos[1] - dispPos[1]) * Math.min(1, dt * 14);
   }
-  camera.position.set((dispPos[0] + 0.5) * TILE_M, EYE_H, (dispPos[1] + 0.5) * TILE_M);
+  camera.position.set((dispPos[0] + 0.5) * TILE_M, EYE_H + bobY, (dispPos[1] + 0.5) * TILE_M);
   camera.rotation.set(0, yaw, 0, "YXZ");
   const nowTick = lastStateTick + (now - lastStateAt) / TICK_MS - INTERP_DELAY_MS / TICK_MS;
   for (const [eid, e] of known) {
