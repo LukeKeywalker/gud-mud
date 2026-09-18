@@ -7,6 +7,9 @@ const WALL_H = 3.0;
 const EYE_H = 1.6;
 const RES_H = 216;
 const DITHER = true;
+const FISHEYE_K = 0.30;
+const BALL_FIT = 1.0;   // ball diameter vs. shorter viewport edge (1.0 = fills the max square, no margin)
+const GLOW = 0.50;      // glass rim intensity
 const STEP_MS = 308;  // step period (walk slowed 1.5x); gap between steps = STEP_MS - STEP_TWEEN_MS
 const ARCH_R = 1.5;       // half the 3-tile doorway span
 const ARCH_SPRING = 2.0;  // springline, ~2/3 of WALL_H
@@ -41,7 +44,7 @@ const pending = [];        // { seq, dx, dy }
 const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,y,yaw}] }
 
 let scene, camera, renderer, torch;
-let postRT, postCam, postScene;
+let postRT, postCam, postScene, postMat;
 const tex = {};
 const groups = new Map();     // eid -> THREE.Group
 let hudName, hudCount, loaderEl, dieEl;
@@ -97,6 +100,7 @@ function fitBuffer() {
   const h = RES_H;
   const w = Math.max(2, Math.round(h * asp));
   if (postRT && (postRT.width !== w || postRT.height !== h)) postRT.setSize(w, h);
+  if (postMat) postMat.uniforms.aspect.value = w / h;
   if (w === bufW && h === bufH) return;
   bufW = w; bufH = h;
   renderer.setSize(w, h, false);
@@ -108,13 +112,13 @@ function initScene() {
   buildTextures();
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050505);
-  scene.fog = new THREE.FogExp2(0x050505, 0.10);
+  scene.fog = new THREE.FogExp2(0x050505, 0.06);
   camera = new THREE.PerspectiveCamera(75, 1, 0.05, 80);
   renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: false });
   renderer.setPixelRatio(1);
   fitBuffer();
   addEventListener("resize", fitBuffer);
-  torch = new THREE.PointLight(0xffa64d, 70, 26, 1.45);
+  torch = new THREE.PointLight(0xffa64d, 70, 55, 1.45);
   torch.position.set(0.35, -0.35, 0.25);
   camera.add(torch);
   scene.add(camera);
@@ -123,12 +127,22 @@ function initScene() {
     postRT = new THREE.WebGLRenderTarget(2, 2);
     postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     postScene = new THREE.Scene();
-    const postMat = new THREE.ShaderMaterial({
-      uniforms: { tex: { value: postRT.texture } },
+    postMat = new THREE.ShaderMaterial({
+      uniforms: {
+        tex: { value: postRT.texture },
+        aspect: { value: bufW / Math.max(1, bufH) },
+        fisheye: { value: FISHEYE_K },
+        ballfit: { value: BALL_FIT },
+        glow: { value: GLOW },
+      },
       vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
       fragmentShader: [
         "precision mediump float;",
         "uniform sampler2D tex;",
+        "uniform float aspect;",
+        "uniform float fisheye;",
+        "uniform float ballfit;",
+        "uniform float glow;",
         "varying vec2 vUv;",
         "const mat4 BAYER = mat4(",
         " 0.0, 8.0, 2.0, 10.0,",
@@ -136,13 +150,27 @@ function initScene() {
         " 3.0, 11.0, 1.0, 9.0,",
         " 15.0, 7.0, 13.0, 5.0);",
         "void main() {",
-        "  vec4 c = texture2D(tex, vUv);",
+        "  vec2 p = vUv - 0.5;",
+        "  p.x *= aspect;",
+        "  float r = length(p);",
+        "  float R = 0.5 * min(1.0, aspect) * ballfit;",
+        "  float q = r / max(R, 1e-5);",
+        "  vec2 pw = p / (1.0 + fisheye * q * q);",
+        "  pw.x /= aspect;",
+        "  vec2 uv = pw + 0.5;",
+        "  vec3 ball = clamp(texture2D(tex, uv).rgb, 0.0, 1.0);",
+        "  float rim   = smoothstep(0.88, 0.995, q);",
+        "  float edge  = smoothstep(0.80, 1.0, q);",
+        "  vec3 glassCol = vec3(0.82, 0.88, 1.00);",
+        "  float spec = glow * 0.60 * rim;",
+        "  vec3 comp = ball * (1.0 - 0.10 * edge) + glassCol * spec;",
+        "  float mask = 1.0 - smoothstep(R - 0.010, R + 0.010, r);",
         "  float b = BAYER[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))];",
         "  float t = (b - 7.5) / 16.0;",
-        "  vec3 lin = clamp(c.rgb, 0.0, 1.0);",
-        "  vec3 srg = mix(lin * 12.92, 1.055 * pow(lin, vec3(1.0/2.4)) - 0.055, step(vec3(0.0031308), lin));",
+        "  vec3 srg = mix(comp * 12.92, 1.055 * pow(comp, vec3(1.0/2.4)) - 0.055, step(vec3(0.0031308), comp));",
         "  vec3 v = max(floor(srg * 11.0 + t + 0.001), 1.0) / 11.0;",
-        "  gl_FragColor = vec4(v, c.a);",
+        "  vec3 bg = vec3(5.0/255.0, 5.0/255.0, 5.0/255.0);",
+        "  gl_FragColor = vec4(mix(bg, v, mask), 1.0);",
         "}"
       ].join("\n")
     });
@@ -305,6 +333,9 @@ function syncMesh(eid, e) {
     addBox(0.2, 0.6, 0.2, 0.38, 0.96, 0);
     addBox(0.46, 0.46, 0.46, 0, 1.5, 0);
     g.add(namePlate(e.name, e.color));
+    const torchLight = new THREE.PointLight(0xffa64d, 46, 20, 1.5);
+    torchLight.position.set(0, 1.45, 0);
+    g.add(torchLight);
     groups.set(eid, g);
     scene.add(g);
   }
