@@ -827,7 +827,7 @@ def test_npc_tile_at_ping_pong(world):
     for i, n in enumerate(world.spec.npcs):
         assert npc_tile_at(n, 0) == (2, 1)
         assert npc_tile_at(n, 1) == (3, 1)
-        assert npc_tile_at(n, 5) == (2, 1)
+        assert npc_tile_at(n, 5) == (3, 1)
 
 
 def test_npc_blocks_target_next_tick(world):
@@ -877,7 +877,7 @@ def test_step_events_ordered_by_pid(world):
 
 def test_step_updates_world_tick(world):
     from game_core.moves import step, InputFrame
-    step(world, 7, [InputFrame(65000, 1, 0, 0, 0)] if False else [])
+    step(world, 7, [])
     assert world.t == 7
 ```
 
@@ -923,8 +923,7 @@ def test_cap_picks_by_distance_then_pid(world):
         return room_distance(world.adj, 1, e.room)
     assert len(vis) == MAX_VISIBLE
     ds = [dist(e) for e in vis]
-    assert all(d == 1 for d in ds)  # room B only; all cavity-distance 1
-    # npc (65000) is in room A (distance 0) so it appears first
+    assert all(d <= 1 for d in ds)  # npc at distance 0 first; rest are room B (distance 1)
     assert vis[0].pid == 65000
 
 

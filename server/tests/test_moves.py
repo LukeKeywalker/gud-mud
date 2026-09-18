@@ -89,5 +89,5 @@ def test_step_events_ordered_by_pid(world):
 
 def test_step_updates_world_tick(world):
     from game_core.moves import step, InputFrame
-    step(world, 7, [InputFrame(65000, 1, 0, 0, 0)] if False else [])
+    step(world, 7, [])
     assert world.t == 7
