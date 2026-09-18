@@ -15,7 +15,7 @@
 - All work is done **only** inside the worktree `.worktrees/deploy-aws` (branch `deploy-aws`, base `d23b954b`). Never modify the root working copy.
 - **No changes** to `server/`, `client/`, `shared/`, `maps/`, `db/`, `docker-compose.yml`; only *append* `deploy`/`update`/`destroy` targets to `Makefile` (leave existing targets as-is).
 - No CloudFront, no S3, no RDS, no secrets manager, no cloud assets. User-data is rendered text inlined by CDK (enforcing ≤16 KB in code).
-- Region is pinned: `eu-north-1` (`Environment(region=...)` only; the account is env-agnostic, coming from the shell's `~/.aws` credentials).
+- Region is pinned: `eu-north-1`; the account is resolved at synth time from the shell's `~/.aws` credentials via `boto3 sts get-caller` (`Environment(account=..., region="eu-north-1")` — required because `MachineImage.lookup` needs an account at the stack level).
 - Verbatim constants: repo `https://github.com/LukeKeywalker/gud-mud.git`; Route53 zone `Z08775041GRCKGXJFLFZW` (`michniewicz.contact.`); domain `mud.michniewicz.contact`; ALB target host port `18000`; health path `/healthz`; instance name (→ `Name` tag) `mud-game`; SSM policy `arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore`.
 - The existing apex site and distribution `E2NKRDY8YYEIIU` must remain untouched; after deploy, `curl -sI https://michniewicz.contact/` must still return 200.
 - Every task ends with an independently verifiable state (synth succeeds, scripts are lint-clean, tests green) and a commit.
@@ -51,6 +51,7 @@
 aws-cdk-lib==2.270.0
 constructs>=10.0.0
 pyyaml>=6.0
+boto3>=1.34
 ```
 
 - [ ] **Step 2: Write `deployment/CDK.toml`**
@@ -75,6 +76,7 @@ class MudDemoStack(Stack):
 if __name__ == "__main__":
     app = App()
     MudDemoStack(app, "MudDemo", env=Environment(region="eu-north-1"))
+    app.synth()
 ```
 
 - [ ] **Step 4: Create the deployment venv and install deps**
@@ -117,7 +119,7 @@ git commit -m "deployment: scaffold python CDK app (MudDemo stack)"
 
 ```bash
 #!/usr/bin/env bash
-# Rendered into EC2 User Data by deployment/app.py (placeholders __REPO__, __SHA__).
+# Rendered into EC2 User Data by deployment/app.py (repo URL + committed sha are substituted in).
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -246,6 +248,11 @@ INSTANCE_NAME = "mud-game"
 AMZ_OWNER = "099720109477"  # Canonical CID for Ubuntu publishes
 
 
+def current_account() -> str:
+    import boto3
+    return boto3.client("sts").get_caller_identity()["Account"]
+
+
 def pinned_sha() -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
@@ -363,7 +370,10 @@ class MudDemoStack(Stack):
 
 if __name__ == "__main__":
     app = App()
-    MudDemoStack(app, "MudDemo", env=Environment(region="eu-north-1"))
+    MudDemoStack(
+        app, "MudDemo",
+        env=Environment(account=current_account(), region="eu-north-1"))
+    app.synth()
 ```
 
 - [ ] **Step 2: Synth (resolves the Ubuntu AMI — needs default AWS credentials/region in the shell)**
@@ -396,12 +406,15 @@ assert {"Key": "Name", "Value": "mud-game"} in inst["Tags"], inst["Tags"]
 redirect = [r for r in have("ElasticLoadBalancingV2::Listener")
             if "RedirectConfig" in json.dumps(r["Properties"].get("DefaultActions", []))]
 assert redirect, "no 301 redirect listener found"
-ingress18000 = [r for r in have("EC2::SecurityGroup")
-                if json.dumps(r["Properties"].get("SecurityGroupIngress", [])) and False] \
-    + [r for r in have("EC2::SecurityGroupIngress")
-        if r["Properties"].get("FromPort") == 18000]
+ingress18000 = [r for r in have("EC2::SecurityGroupIngress")
+                if r["Properties"].get("FromPort") == 18000]
 assert ingress18000, "no ingress rule for 18000"
-alb_ports = [r for r in have("ElasticLoadBalancingV2::LoadBalancer")]
+ud = json.dumps(have("EC2::Instance")[0]["Properties"]["UserData"])
+assert "git clone https://github.com/LukeKeywalker/gud-mud.git" in ud
+import subprocess
+sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+assert sha in ud, "user-data not pinned to worktree HEAD: " + sha
+assert not any("NATGateway" in r["Type"] for r in t.values()), "unexpected NAT gateway"
 print("TEMPLATE_OK")
 EOF
 ```
