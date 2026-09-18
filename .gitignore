@@ -6,6 +6,10 @@ __pycache__/
 node_modules/
 server/tests/parity/node_modules/
 .idea/
+.worktrees/
+.cdk.staging/
+.cdk.pkl
+cdk.out/
 server/tests/parity/payload.json
 docker-compose.verify.yml
 devtools/shots/
