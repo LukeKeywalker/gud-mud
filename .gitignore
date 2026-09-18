@@ -6,3 +6,4 @@ __pycache__/
 node_modules/
 server/tests/parity/node_modules/
 load_report.md
+docker-compose.verify.yml
