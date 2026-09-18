@@ -99,12 +99,13 @@ class MudDemoStack(Stack):
             instance_type=ec2.InstanceType("t4g.micro"),
             instance_name=INSTANCE_NAME,
             machine_image=ec2.MachineImage.lookup(
-                name="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
+                name="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*",
                 owners=[AMZ_OWNER],
                 filters={
                     "root-device-type": ["ebs"],
                     "virtualization-type": ["hvm"],
                     "state": ["available"],
+                    "architecture": ["arm64"],
                 },
             ),
             role=role,
@@ -114,7 +115,7 @@ class MudDemoStack(Stack):
         )
         tg.add_target(tgt.InstanceTarget(instance))
         inst_sg.add_ingress_rule(
-            alb_sg, ec2.Port.tcp(HOST_PORT), description="ALB -> game host port")
+            alb_sg, ec2.Port.tcp(HOST_PORT), description="ALB-to-game-host-port")
 
         zone = route53.PublicHostedZone.from_hosted_zone_attributes(
             self, "Zone",
