@@ -1968,7 +1968,8 @@ class GameLoop:
             self._send_queued(c, frame)
         await self._check_congestion()
         for e in self.world.entity_order:
-            self._dirty.add((e.pid, e.name, e.color, e.room, e.x, e.y, e.yaw))
+            if not e.is_npc:
+                self._dirty.add((e.pid, e.name, e.color, e.room, e.x, e.y, e.yaw))
         self.t += 1
 
     def _delta_ops(self, c: Client) -> list:
