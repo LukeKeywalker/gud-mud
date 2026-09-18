@@ -122,7 +122,7 @@ export function floorStone(seed) {
       r = 4; g = 1; b = 4;
     } else {
       const blk = (ix >> 6) + row * 2;
-      const base = 34 + hashStone(blk + 131, seed) * 28;
+      const base = 105 + hashStone(blk + 131, seed) * 64;
       const hue = (hashStone(blk * 5 + 47, seed) - 0.5) * 12;
       const jx = ix & 63;
       const w = fbm(jx * 0.06 + 19.4, iy * 0.06 + blk * 0.29, 2);
@@ -154,7 +154,7 @@ export function ceilStone(seed) {
     const w = fbm(x * (5 / 128) + 3.3, y * (5 / 128) + 7.7, 2);
     const grain = fbm((x + w * 11) * (11 / 128), (y + w * 11) * (11 / 128), 4) * 12;
     const fine = fbm(x * (115 / 128) + 31.3, y * (115 / 128) - 17.9, 2) * 5;
-    const v = 29 + tone + big + grain + fine;
+    const v = 49 + tone + big + grain + fine;
     const rim = Math.abs(fbm(x * (4 / 128) - 5.2, y * (4 / 128) + 12.6, 3));
     const r2 = rim < 0.05 ? (0.05 - rim) * 300 : 0;
     return [clamp8(v + 5 - r2), clamp8(v + 2 - r2), clamp8(v + 6 - r2)];
