@@ -5,5 +5,6 @@ __pycache__/
 .pytest_cache/
 node_modules/
 server/tests/parity/node_modules/
+.idea/
 server/tests/parity/payload.json
 docker-compose.verify.yml
