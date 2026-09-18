@@ -11,18 +11,17 @@ const CORE_FILES = ["__init__.py", "constants.py", "world.py", "moves.py", "visi
 const name = (localStorage.getItem("mudName") || "wanderer").slice(0, 24);
 localStorage.setItem("mudName", name);
 
-let pyodide, core, world;
+let pyodide, core, world, b64d;
 let selfId = -1, seq = 0, localTick = 0, lastStateAt = 0, stateCount = 0;
 let predPos = [0, 0], dispPos = [0, 0];
 let yaw = 0, pitch = 0.15, connected = 0;
 const keys = {};
 const pending = [];        // { seq, dx, dy }
-const applyTicks = new Map();
 const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,y,yaw}] }
 
 let scene, camera, renderer, torch;
 const groups = new Map();     // eid -> THREE.Group
-let hudName, hudCount, loaderEl, barEl, dieEl;
+let hudName, hudCount, loaderEl, dieEl;
 let ws;
 
 // ---------- boot ----------
@@ -46,8 +45,9 @@ async function bootCore(log, setProgress) {
     setProgress(0.35 + 0.55 * (done / total));
   }
   log("game_core loaded into WASM FS");
-  pyodide.runPython("import sys; sys.path.insert(0, ''); import game_core");
-  core = pyodide.import("game_core");
+  pyodide.runPython("import sys; sys.path.insert(0, '/'); import game_core.protocol, game_core.moves, game_core.world, game_core.visibility; import game_core; import base64; b64d = base64.b64decode");
+  core = pyodide.globals.get("game_core");
+  b64d = pyodide.globals.get("b64d");
   setProgress(0.9);
 }
 
@@ -97,7 +97,7 @@ function initScene() {
 
 function buildGeometry() {
   const w = world.spec.width, h = world.spec.height;
-  const codes = pyodide.toJs(world.spec.codes);
+  const codes = world.spec.codes.toJs();
   const walls = [];
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++)
@@ -121,8 +121,9 @@ function buildGeometry() {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((w * TILE_M) / 2, 0, (h * TILE_M) / 2);
   scene.add(floor);
-  const props = pyodide.toJs(world.spec.props);
-  for (const [kind, x, y] of props) {
+  const props = world.spec.props.toJs();
+  for (const pr of props) {
+    const kind = pr.kind, x = pr.x, y = pr.y;
     const p = new THREE.Mesh(
       new THREE.BoxGeometry(0.18, 0.30, 0.18),
       new THREE.MeshStandardMaterial({ color: kind === 1 ? 0x5a4632 : 0x606a70, roughness: 0.9 })
@@ -164,34 +165,41 @@ function syncMesh(eid, e) {
   g.rotation.y = -((e.yaw / 2048) * Math.PI * 2);
 }
 
-const toU8 = (proxy) => { const j = pyodide.toJs(proxy); return j instanceof Uint8Array ? j : new Uint8Array(j); };
+const toU8 = (x) => {
+  const j = (typeof x === "object" && typeof x.toJs === "function") ? x.toJs() : x;
+  if (j instanceof Uint8Array) return j;
+  const u = new Uint8Array(j.length);
+  for (let i = 0; i < j.length; i++) u[i] = j[i];
+  return u;
+};
 const b64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const toPyBytes = (u8) => b64d(b64(u8));
 
 // ---------- socket ----------
 function wireSocket() {
   ws.onopen = () => ws.send(toU8(core.protocol.pack_join(0, name)));
 
   ws.onmessage = (e) => {
-    const u8 = (e.data instanceof ArrayBuffer) ? new Uint8Array(e.data) : pyodide.toJs(e.data);
+    const u8 = new Uint8Array(e.data);
     let k;
     try { k = u8[0]; } catch { return; }
     if (k === 2) {
-      const r = pyodide.toJs(core.protocol.unpack_welcome(u8));
+      const r = core.protocol.unpack_welcome(toPyBytes(u8)).toJs();
       selfId = r[0]; localTick = r[1];
       predPos = [r[4], r[5]]; dispPos = [r[4], r[5]];
       yaw = (r[7] / 2048) * Math.PI * 2;
-      const blob = r[2] instanceof Uint8Array ? r[2] : new Uint8Array(r[2]);
+      const blob = toU8(r[2]);
       pyodide.globals.set("mud_blob", b64(blob));
       pyodide.runPython("import base64; mud_blob = base64.b64decode(mud_blob)");
       world = pyodide.runPython("game_core.world.build_world(game_core.protocol.unpack_world_blob(mud_blob))");
     } else if (k === 16 || k === 17) {
-      const r = pyodide.toJs(core.protocol.unpack_state(u8));
+      const r = core.protocol.unpack_state(toPyBytes(u8)).toJs();
       applyState(r[0], r[1], r[2], r[3], r[4]);
     } else if (k === 32) {
-      const r = pyodide.toJs(core.protocol.unpack_kick(u8));
+      const r = core.protocol.unpack_kick(toPyBytes(u8)).toJs();
       die("server: " + r[1] + " (" + r[0] + ")", false);
     } else if (k === 33) {
-      const r = pyodide.toJs(core.protocol.unpack_error(u8));
+      const r = core.protocol.unpack_error(toPyBytes(u8)).toJs();
       die("server: " + r[1] + " (" + r[0] + ")", true);
     }
   };
@@ -292,8 +300,7 @@ function simTick() {
   if (selfId < 0 || stateCount === 0) return;
   localTick += 1;
   const [dx, dy] = inputDir();
-  const rr = core.moves.try_move_at(world, predPos[0], predPos[1], dx, dy, localTick);
-  const [nx, ny] = pyodide.toJs(rr);
+  const [nx, ny] = core.moves.try_move_at(world, predPos[0], predPos[1], dx, dy, localTick).toJs();
   predPos = [nx, ny];
   seq += 1;
   pending.push({ seq, dx, dy });

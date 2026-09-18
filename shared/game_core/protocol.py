@@ -106,7 +106,7 @@ def unpack_input(b: bytes):
 
 
 def pack_resync_req() -> bytes:
-    return bytes([4])
+    return bytes([MSG_RESYNC_REQ])
 
 
 # ---- ops ----------------------------------------------------------------
