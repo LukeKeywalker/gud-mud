@@ -1,8 +1,24 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>MUD</title></head>
-<body style="background:#050505;color:#ddd;font-family:monospace">
-  <h2>Eye of the Beholder (MUD) — placeholder</h2>
-  <p>client lands in Tasks 6-8</p>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MUD — Eye of the Beholder</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"
+          onerror="alert('failed to load Pyodide CDN')"></script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="name"></div>
+    <div id="count">… online</div>
+  </div>
+  <div id="crosshair"></div>
+  <div id="loader">
+    <div id="log">loading…</div>
+    <div id="barwrap"><div id="bar"></div></div>
+  </div>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
