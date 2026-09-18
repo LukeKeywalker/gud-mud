@@ -4,11 +4,6 @@ html, body { margin: 0; padding: 0; height: 100%; background: #050505; overflow:
   position: fixed; top: 10px; left: 12px; color: #d8c9a3;
   font: 13px/1.5 monospace; text-shadow: 0 1px 2px #000; pointer-events: none;
 }
-#crosshair {
-  position: fixed; left: 50%; top: 50%; width: 4px; height: 4px;
-  margin: -2px 0 0 -2px; background: rgba(220, 200, 160, 0.8);
-  border-radius: 50%; pointer-events: none;
-}
 #loader {
   position: fixed; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 14px;

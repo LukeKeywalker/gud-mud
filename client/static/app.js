@@ -2,7 +2,12 @@ import * as THREE from "./three.module.js";
 
 const TICK_MS = 50;
 const TILE_M = 0.25;
-const EYE_H = 1.6;
+const EYE_H = 0.85;
+const STEP_MS = 250;
+const STEP_TWEEN_MS = 180;
+const ROT_TWEEN_MS = 150;
+const TAU = Math.PI * 2;
+const FACE_DIRS = [[0, -1], [-1, 0], [0, 1], [1, 0]];
 const INTERP_DELAY_MS = 120;
 const UNACK_LIMIT = 5;
 const SNAP_TILES = 2;
@@ -14,7 +19,11 @@ localStorage.setItem("mudName", name);
 let pyodide, core, world, b64d;
 let selfId = -1, seq = 0, localTick = 0, lastStateAt = 0, stateCount = 0;
 let predPos = [0, 0], dispPos = [0, 0];
-let yaw = 0, pitch = 0.15, connected = 0;
+let yaw = 0, facing = 0, connected = 0;
+let walkDir = 0, lastStepAt = -1e9;
+let stepPending = null;
+const moveTw = { on: false, t0: 0, fx: 0, fy: 0, tx: 0, ty: 0 };
+const rotTw = { on: false, t0: 0, from: 0, to: 0 };
 const keys = {};
 const pending = [];        // { seq, dx, dy }
 const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,y,yaw}] }
@@ -199,7 +208,8 @@ function wireSocket() {
       const r = core.protocol.unpack_welcome(toPyBytes(u8)).toJs();
       selfId = r[0]; localTick = r[1];
       predPos = [r[4], r[5]]; dispPos = [r[4], r[5]];
-      yaw = (r[7] / 2048) * Math.PI * 2;
+      facing = normYaw(Math.round((r[7] / 2048) * TAU / (Math.PI / 2)) * (Math.PI / 2));
+      yaw = facing;
       const blob = toU8(r[2]);
       pyodide.globals.set("mud_blob", b64(blob));
       pyodide.runPython("import base64; mud_blob = base64.b64decode(mud_blob)");
@@ -265,6 +275,8 @@ function applyState(kind, tick, ack, connectedCt, ops) {
   if (isResync) {
     resyncRequested = false;
     pending.length = 0;
+    stepPending = null;
+    moveTw.on = false;
   }
   while (pending.length && pending[0].seq <= ack) pending.shift();
   for (const op of ops) applyOp(op, tick);
@@ -277,6 +289,8 @@ function applyState(kind, tick, ack, connectedCt, ops) {
           predPos = [me.x, me.y];
           dispPos = [me.x, me.y];
           pending.length = 0;
+          stepPending = null;
+          moveTw.on = false;
         } else if (!resyncRequested) {
           resyncRequested = true;
           ws.send(toU8(core.protocol.pack_resync_req()));
@@ -291,29 +305,49 @@ function applyState(kind, tick, ack, connectedCt, ops) {
 }
 
 // ---------- input + prediction ----------
-function yaw16() {
-  let r = (yaw / (Math.PI * 2)) % 1;
-  if (r < 0) r += 1;
-  return Math.floor(r * 2048) % 2048;
+function normYaw(a) {
+  a = ((a % TAU) + TAU) % TAU;
+  if (a > Math.PI) a -= TAU;
+  return a;
 }
 
-function inputDir() {
-  let f = 0, r = 0;
-  if (keys.KeyW) f += 1;
-  if (keys.KeyS) f -= 1;
-  if (keys.KeyD) r += 1;
-  if (keys.KeyA) r -= 1;
-  const fx = Math.sin(yaw), fy = Math.cos(yaw);
-  const rx = Math.cos(yaw), ry = -Math.sin(yaw);
-  let dx = Math.round(f * fx + r * rx), dy = Math.round(f * fy + r * ry);
-  return [Math.max(-1, Math.min(1, dx)), Math.max(-1, Math.min(1, dy))];
+function shortestAngle(a) {
+  return ((a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+}
+
+function facingQuadrant() {
+  return (((Math.round(facing / (Math.PI / 2)) % 4) + 4) % 4);
+}
+
+function yaw16() {
+  return facingQuadrant() * 512;
+}
+
+function doStep(dir) {
+  if (selfId < 0 || stateCount === 0 || moveTw.on || stepPending) return;
+  const d = FACE_DIRS[facingQuadrant()];
+  stepPending = [d[0] * dir, d[1] * dir];
+}
+
+function turn(dir) {
+  const f = normYaw(Math.round(facing / (Math.PI / 2) + dir) * (Math.PI / 2));
+  const to = yaw - shortestAngle(yaw - f);
+  rotTw.on = true; rotTw.t0 = performance.now(); rotTw.from = yaw; rotTw.to = to;
+  facing = f;
 }
 
 function simTick() {
   if (selfId < 0 || stateCount === 0) return;
   localTick += 1;
-  const [dx, dy] = inputDir();
+  const [dx, dy] = stepPending || [0, 0];
+  stepPending = null;
   const [nx, ny] = core.moves.try_move_at(world, predPos[0], predPos[1], dx, dy, localTick).toJs();
+  if ((dx !== 0 || dy !== 0) && (nx !== predPos[0] || ny !== predPos[1])) {
+    moveTw.on = true; moveTw.t0 = performance.now();
+    moveTw.fx = dispPos[0]; moveTw.fy = dispPos[1];
+    moveTw.tx = nx; moveTw.ty = ny;
+    lastStepAt = performance.now();
+  }
   predPos = [nx, ny];
   seq += 1;
   pending.push({ seq, dx, dy });
@@ -329,10 +363,25 @@ function render(now) {
   lastFrame = now;
   torch.intensity = 21 + Math.sin(now * 0.021) * 2 + (Math.random() - 0.5) * 5;
   if (selfId >= 0) {
-    dispPos[0] += (predPos[0] - dispPos[0]) * Math.min(1, dt * 14);
-    dispPos[1] += (predPos[1] - dispPos[1]) * Math.min(1, dt * 14);
+    if (walkDir !== 0 && !moveTw.on && now - lastStepAt >= STEP_MS) doStep(walkDir);
+    if (rotTw.on) {
+      const t = Math.min(1, (now - rotTw.t0) / ROT_TWEEN_MS);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      yaw = rotTw.from + (rotTw.to - rotTw.from) * e;
+      if (t >= 1) { yaw = rotTw.to; rotTw.on = false; }
+    }
+    if (moveTw.on) {
+      const t = Math.min(1, (now - moveTw.t0) / STEP_TWEEN_MS);
+      const e = 1 - Math.pow(1 - t, 3);
+      dispPos[0] = moveTw.fx + (moveTw.tx - moveTw.fx) * e;
+      dispPos[1] = moveTw.fy + (moveTw.ty - moveTw.fy) * e;
+      if (t >= 1) { dispPos[0] = moveTw.tx; dispPos[1] = moveTw.ty; moveTw.on = false; }
+    } else {
+      dispPos[0] += (predPos[0] - dispPos[0]) * Math.min(1, dt * 14);
+      dispPos[1] += (predPos[1] - dispPos[1]) * Math.min(1, dt * 14);
+    }
     camera.position.set((dispPos[0] + 0.5) * TILE_M, EYE_H, (dispPos[1] + 0.5) * TILE_M);
-    camera.rotation.set(pitch, yaw, 0, "YXZ");
+    camera.rotation.set(0, yaw, 0, "YXZ");
   }
   const nowTick = localTick + (now - lastStateAt) / TICK_MS;
   for (const [eid, e] of known) {
@@ -400,16 +449,19 @@ async function boot() {
   ws.binaryType = "arraybuffer";
   wireSocket();
   ws.onclose = () => { logEl && (loaderEl && loaderEl.style.display !== "none") && (loaderEl.style.display = "flex"); };
-  const cvs = renderer.domElement;
-  cvs.addEventListener("click", () => cvs.requestPointerLock());
-  document.addEventListener("mousemove", (e) => {
-    if (document.pointerLockElement !== cvs) return;
-    yaw -= e.movementX * 0.0022;
-    pitch -= e.movementY * 0.0022;
-    pitch = Math.max(-1.35, Math.min(1.35, pitch));
+  addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+    keys[e.code] = true;
+    if (e.code === "KeyW") { walkDir = 1; doStep(1); }
+    else if (e.code === "KeyS") { walkDir = -1; doStep(-1); }
+    else if (e.code === "KeyA") turn(1);
+    else if (e.code === "KeyD") turn(-1);
   });
-  addEventListener("keydown", (e) => { keys[e.code] = true; });
-  addEventListener("keyup", (e) => { keys[e.code] = false; });
+  addEventListener("keyup", (e) => {
+    keys[e.code] = false;
+    if (e.code === "KeyW" && walkDir === 1) walkDir = keys.KeyS ? -1 : 0;
+    else if (e.code === "KeyS" && walkDir === -1) walkDir = keys.KeyW ? 1 : 0;
+  });
   requestAnimationFrame(render);
   setInterval(simTick, TICK_MS);
   loaderEl.style.opacity = "0";
