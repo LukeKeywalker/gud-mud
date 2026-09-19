@@ -171,3 +171,4 @@ export function ceilStone(seed) {
     return [clamp8(v + 5 - r2), clamp8(v + 2 - r2), clamp8(v + 6 - r2)];
   });
 }
+

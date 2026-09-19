@@ -7,9 +7,8 @@ const WALL_H = 3.0;
 const EYE_H = 1.6;
 const RES_H = 216;
 const DITHER = true;
-const FISHEYE_K = 0.30;
-const BALL_FIT = 1.0;   // ball diameter vs. shorter viewport edge (1.0 = fills the max square, no margin)
-const GLOW = 0.50;      // glass rim intensity
+const VIG = 0.55;       // vignette darkness at the screen corners
+const FRINGE = 0.008;   // max RGB channel split at the edges (fraction of screen height)
 const STEP_MS = 308;  // step period (walk slowed 1.5x); gap between steps = STEP_MS - STEP_TWEEN_MS
 const ARCH_R = 1.5;       // half the 3-tile doorway span
 const ARCH_SPRING = 2.0;  // springline, ~2/3 of WALL_H
@@ -131,18 +130,16 @@ function initScene() {
       uniforms: {
         tex: { value: postRT.texture },
         aspect: { value: bufW / Math.max(1, bufH) },
-        fisheye: { value: FISHEYE_K },
-        ballfit: { value: BALL_FIT },
-        glow: { value: GLOW },
+        vig: { value: VIG },
+        fringe: { value: FRINGE },
       },
       vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
       fragmentShader: [
         "precision mediump float;",
         "uniform sampler2D tex;",
         "uniform float aspect;",
-        "uniform float fisheye;",
-        "uniform float ballfit;",
-        "uniform float glow;",
+        "uniform float vig;",
+        "uniform float fringe;",
         "varying vec2 vUv;",
         "const mat4 BAYER = mat4(",
         " 0.0, 8.0, 2.0, 10.0,",
@@ -150,27 +147,21 @@ function initScene() {
         " 3.0, 11.0, 1.0, 9.0,",
         " 15.0, 7.0, 13.0, 5.0);",
         "void main() {",
-        "  vec2 p = vUv - 0.5;",
-        "  p.x *= aspect;",
-        "  float r = length(p);",
-        "  float R = 0.5 * min(1.0, aspect) * ballfit;",
-        "  float q = r / max(R, 1e-5);",
-        "  vec2 pw = p / (1.0 + fisheye * q * q);",
-        "  pw.x /= aspect;",
-        "  vec2 uv = pw + 0.5;",
-        "  vec3 ball = clamp(texture2D(tex, uv).rgb, 0.0, 1.0);",
-        "  float rim   = smoothstep(0.88, 0.995, q);",
-        "  float edge  = smoothstep(0.80, 1.0, q);",
-        "  vec3 glassCol = vec3(0.82, 0.88, 1.00);",
-        "  float spec = glow * 0.60 * rim;",
-        "  vec3 comp = ball * (1.0 - 0.10 * edge) + glassCol * spec;",
-        "  float mask = 1.0 - smoothstep(R - 0.010, R + 0.010, r);",
+        "  vec2 d = (vUv - 0.5) * vec2(aspect, 1.0);",
+        "  float q = length(d) / (0.5 * length(vec2(aspect, 1.0)));",
+        "  float e = smoothstep(0.30, 1.0, q);",
+        "  vec2 dir = d / max(length(d), 1e-6);",
+        "  vec2 o = fringe * e * e * vec2(dir.x / aspect, dir.y);",
+        "  vec3 c;",
+        "  c.r = texture2D(tex, vUv + o).r;",
+        "  c.g = texture2D(tex, vUv).g;",
+        "  c.b = texture2D(tex, vUv - o).b;",
+        "  vec3 comp = clamp(c, 0.0, 1.0) * (1.0 - vig * e);",
         "  float b = BAYER[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))];",
         "  float t = (b - 7.5) / 16.0;",
         "  vec3 srg = mix(comp * 12.92, 1.055 * pow(comp, vec3(1.0/2.4)) - 0.055, step(vec3(0.0031308), comp));",
         "  vec3 v = max(floor(srg * 11.0 + t + 0.001), 1.0) / 11.0;",
-        "  vec3 bg = vec3(5.0/255.0, 5.0/255.0, 5.0/255.0);",
-        "  gl_FragColor = vec4(mix(bg, v, mask), 1.0);",
+        "  gl_FragColor = vec4(v, 1.0);",
         "}"
       ].join("\n")
     });
