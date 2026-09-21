@@ -5,8 +5,8 @@ const TICK_MS = 50;
 const TILE_M = 1.0;
 const WALL_H = 3.0;
 const EYE_H = 1.6;
-const RES_W = 640;
-const RES_H = 480;
+const RES_W = 320;
+const RES_H = 256;
 const DITHER = true;
 const TOON_STEPS = 3;   // cel-shading light bands
 const VIG = 0.55;       // vignette darkness at the screen corners
@@ -136,7 +136,7 @@ let cvEl, boxW = 0, boxH = 0;
 function fitBuffer() {
   const vw = innerWidth, vh = innerHeight;
   if (vw > 0 && vh > 0) {
-    const sc = Math.min(vw / RES_W, vh / RES_H);  // letterbox the fixed 4:3 frame
+    const sc = Math.min(vw / RES_W, vh / RES_H);  // letterbox the fixed 5:4 frame
     const cw = (RES_W * sc) | 0, ch = (RES_H * sc) | 0;
     if (cw !== boxW || ch !== boxH) {
       cvEl.style.width = cw + "px";
@@ -164,7 +164,7 @@ function initScene() {
   renderer.setPixelRatio(1);
   fitBuffer();
   addEventListener("resize", fitBuffer);
-  torch = new THREE.PointLight(0xffa64d, 150, 30, 2.0);
+  torch = new THREE.PointLight(0xffa64d, 150, 45, 2.0);
   torch.position.set(0.35, -0.35, 0.25);
   camera.add(torch);
   scene.add(camera);
@@ -260,7 +260,7 @@ function buildDoorArchGeos() {
 
 function buildDoorArchMeshes(codes, w, h) {
   const { spanX, spanZ } = buildDoorArchGeos();
-  const mat = new THREE.MeshToonMaterial({ map: tex.wall, gradientMap: toonMap });
+  const mat = new THREE.MeshLambertMaterial({ map: tex.wall });
   const add = (geo, px, pz) => {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(px, 0, pz);
@@ -287,7 +287,7 @@ function buildArenaGeometry() {
       if (codes[y * w + x] === 0) walls.push([x, y]);
   const mesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(TILE_M, WALL_H, TILE_M),
-    new THREE.MeshToonMaterial({ map: tex.wall, gradientMap: toonMap }),
+    new THREE.MeshLambertMaterial({ map: tex.wall }),
     walls.length
   );
   const m = new THREE.Matrix4();
@@ -302,7 +302,7 @@ function buildArenaGeometry() {
   floorTex.repeat.set(w, h);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(w * TILE_M, h * TILE_M),
-    new THREE.MeshToonMaterial({ map: floorTex, gradientMap: toonMap })
+    new THREE.MeshLambertMaterial({ map: floorTex })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((w * TILE_M) / 2, 0, (h * TILE_M) / 2);
@@ -311,7 +311,7 @@ function buildArenaGeometry() {
   ceilTex.repeat.set(w, h);
   const ceil = new THREE.Mesh(
     new THREE.PlaneGeometry(w * TILE_M, h * TILE_M),
-    new THREE.MeshToonMaterial({ map: ceilTex, gradientMap: toonMap })
+    new THREE.MeshLambertMaterial({ map: ceilTex })
   );
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set((w * TILE_M) / 2, WALL_H, (h * TILE_M) / 2);
@@ -381,7 +381,7 @@ function syncMesh(eid, e) {
     addBox(0.2, 0.6, 0.2, 0.38, 0.96, 0);
     addBox(0.46, 0.46, 0.46, 0, 1.5, 0);
     g.add(namePlate(e.name, e.color));
-    const torchLight = new THREE.PointLight(0xffa64d, 60, 12, 2.0);
+    const torchLight = new THREE.PointLight(0xffa64d, 60, 18, 2.0);
     torchLight.position.set(0, 1.45, 0);
     g.add(torchLight);
     groups.set(eid, g);
