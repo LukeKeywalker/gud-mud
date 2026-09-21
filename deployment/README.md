@@ -49,6 +49,9 @@ make update              # checkout main and fast-forward it; rebuild containers
 make update SHA=<commit> # run an older commit (rollback)
 ```
 
+`make update` waits for the SSM command to finish (30m timeout) and fails loudly if the remote
+update fails — a pushed commit that doesn't exist on GitHub, for instance.
+
 Live WebSocket connections drop briefly during the container update.
 
 ## Verification

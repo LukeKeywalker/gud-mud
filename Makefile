@@ -40,17 +40,7 @@ deploy-deps:
 	bash -c 'test -d deployment/.venv || python3 -m venv deployment/.venv && deployment/.venv/bin/pip install -q -r deployment/requirements.txt'
 
 update:
-ifdef SHA
-	aws ssm send-command \
-		--instance-ids "$$(aws ec2 describe-instances --filters 'Name=tag:Name,Values=mud-game' --query 'Reservations[].Instances[].InstanceId' --output text)" \
-		--document-name 'AWS-RunShellScript' \
-		--parameters "{\"commands\":[\"bash /opt/mud/deployment/scripts/update.sh $(SHA)\"]}"
-else
-	aws ssm send-command \
-		--instance-ids "$$(aws ec2 describe-instances --filters 'Name=tag:Name,Values=mud-game' --query 'Reservations[].Instances[].InstanceId' --output text)" \
-		--document-name 'AWS-RunShellScript' \
-		--parameters '{"commands":["bash /opt/mud/deployment/scripts/update.sh"]}'
-endif
+	bash deployment/scripts/update_remote.sh $(SHA)
 
 destroy: deploy-deps
 	cdk destroy MudDemo --app "$(CDK_APP)"
