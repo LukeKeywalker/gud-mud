@@ -13,7 +13,7 @@ IID=$(aws ec2 describe-instances --filters 'Name=tag:Name,Values=mud-game' \
 CID=$(aws ssm send-command --instance-ids "$IID" \
   --document-name 'AWS-RunShellScript' \
   --parameters "$(printf '{"commands":["%s"]}' "$CMD")" \
-  --timeout '{"DurationSeconds": 1800}' \
+  --timeout 1800 \
   --query 'Command.CommandId' --output text) || { echo "failed to send SSM command" >&2; exit 1; }
 echo "sent SSM command $CID to $IID: $CMD (30m timeout)"
 
