@@ -10,16 +10,52 @@ const RES_H = 256;
 const DITHER = true;
 const TOON_STEPS = 3;   // cel-shading light bands
 const FISHEYE_K = 0.05;
-const STEP_MS = 308;  // step period (walk slowed 1.5x); gap between steps = STEP_MS - STEP_TWEEN_MS
+const BLUR_COVER = 0.7;  // fraction of the per-frame camera delta the taps span
+const BLUR_REF_D = 3.0;  // reference view distance (m) for the strafe screen shift
+const ROT_WIN = 1 / 60;  // rotation smear window (s)
+const STRAFE_WIN = 2.5 / 60;  // strafe smear window (s)
+const TAN_FOV = Math.tan((75 * Math.PI) / 360);
+const STEP_MS = 260;  // step period; steps tween for the whole period so held movement chains without stops
 const ARCH_R = 1.5;       // half the 3-tile doorway span
 const ARCH_SPRING = 2.0;  // springline, ~2/3 of WALL_H
 const ARCH_RISE = 0.8;    // elliptical crown rise (crown at 2.8)
 const ARCH_EPS = 0.01;    // band inset, keeps faces off Z-coplanar wall/floor/ceiling
 const TILE_DOOR = 21;
 const TILE_ARCH = 22;
-const STEP_TWEEN_MS = 290;
 const ENEMY_SCALE = 2.25;  // asset base fits 0.8 m; 2.25x => ~1.8 m hulks
-const WALK_BOB_AMP = 0.05;  // head-bob height per step, Doom-style
+const DAGGER_SCALE = 0.72;  // asset box is 0.8 m; 0.72x => ~0.58 m dagger
+const DAGGER_ARM = [0.34, -0.42, -0.55];  // right hand, near the lens
+const DAGGER_GRIP = 0.10;  // grip pivot height above the pommel (m)
+const DAGGER_IDLE = { x: -0.30, y: 0, z: -0.32 };  // raised guard, leaning out right, edge out
+const DAGGER_SLOT_YAW = Math.PI / 2;  // slot rotated 90 deg about the weapon's length axis
+const DAGGER_RECOVER_MS = 200;
+const DAGGER_WAVE = { ax: 0.045, az: 0.055, fx: 0.9, fz: 0.63, py: 0.014 };  // idle sway
+const DAGGER_STRIDE_DIP = 0.06;  // U-dip depth of the hilt per walking step
+// diagonal overhead chops: hand path (pivot, camera space) + dagger pose per phase
+const SWING_SEQS = [
+  {  // upper right -> lower left
+    keys: [
+      { d: 250, e: "out",   p: [ 0.02,  0.15, -0.42], r: [ 0.52,  0,  0.14] },  // raise, front-center
+      { d: 160, e: "inout", p: [ 0.34,  0.22, -0.45], r: [ 0.66,  0, -0.60] },  // around to right shoulder
+      { d: 170, e: "in",    p: [-0.42, -0.50, -0.55], r: [-0.98,  0,  0.62] }   // chop across to lower left
+    ]
+  },
+  {  // upper left -> lower right
+    keys: [
+      { d: 250, e: "out",   p: [ 0.02,  0.15, -0.42], r: [ 0.52,  0, -0.14] },  // raise, front-center
+      { d: 160, e: "inout", p: [-0.34,  0.22, -0.45], r: [ 0.66,  0,  0.60] },  // around to left shoulder
+      { d: 170, e: "in",    p: [ 0.42, -0.50, -0.55], r: [-0.98,  0, -0.62] }   // chop across to lower right
+    ]
+  }
+];
+const SWING_EASE = {
+  out: t => 1 - Math.pow(1 - t, 3),
+  inout: t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  in: t => t * t * t
+};
+const WALK_BOB_AMP = 0.09;  // head-bob height per step, Doom-style
+const WALK_NOD = 0.035;  // downward pitch at step apex (rad)
+const LEAN_MAX = 0.08;  // strafe camera roll toward the lean side (rad)
 const ROT_TWEEN_MS = 150;
 const TAU = Math.PI * 2;
 const FACE_DIRS = [[0, -1], [-1, 0], [0, 1], [1, 0]];
@@ -37,10 +73,12 @@ let selfId = -1, seq = 0, localTick = 0, lastStateAt = 0, lastStateTick = 0, sta
 let predPos = [0, 0], dispPos = [0, 0];
 let yaw = 0, facing = 0, connected = 0;
 const mv = { fw: 0, st: 0 };  // movement axes: forward/back, strafe left(-)/right(+)
+let strafeOnset = false;  // next pure-strafe step plays the bob+tilt, then held strafe glides
 let lastStepAt = -1e9;
 let stepPending = null;
 const moveTw = { on: false, t0: 0, fx: 0, fy: 0, tx: 0, ty: 0 };
 const rotTw = { on: false, t0: 0, from: 0, to: 0 };
+let prevYaw = 0, prevRoll = 0;
 const pending = [];        // { seq, dx, dy }
 const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,y,yaw}] }
 
@@ -48,6 +86,9 @@ let scene, camera, renderer, torch;
 let postRT, postCam, postScene, postMat;
 const tex = {};
 const enemyAssets = {};
+let daggerAsset = null;
+let dagger = null;  // { swing: THREE.Group, pivot: THREE.Group, tw: { on, t0, seg, keys } }
+let daggerDipPhase = 0, daggerDipDepth = 0, daggerDipClock = 0;  // continuous U, one per 2 steps
 const groups = new Map();     // eid -> THREE.Group
 let hudName, hudCount, loaderEl, dieEl;
 let ws;
@@ -109,6 +150,11 @@ async function loadEnemyAssets() {
   } catch (e) {
     console.warn("enemy assets unavailable, using boxes", e);
   }
+  try {
+    daggerAsset = await (await fetch("/assets/dagger.json")).json();
+  } catch (e) {
+    console.warn("dagger asset unavailable, no viewmodel", e);
+  }
 }
 
 function buildEnemyGroup(asset) {
@@ -122,6 +168,86 @@ function buildEnemyGroup(asset) {
     g.add(new THREE.Mesh(geo, mat));
   }
   return g;
+}
+
+function buildDaggerViewModel() {
+  if (!daggerAsset) return;
+  const mesh = buildEnemyGroup(daggerAsset);
+  mesh.scale.setScalar(DAGGER_SCALE);
+  mesh.position.y = -DAGGER_GRIP;  // grip pivot at the group origin
+  const slot = new THREE.Group();
+  slot.rotation.y = DAGGER_SLOT_YAW;  // constant rotation about the weapon's length axis
+  slot.add(mesh);
+  const swing = new THREE.Group();
+  swing.add(slot);
+  swing.rotation.set(DAGGER_IDLE.x, DAGGER_IDLE.y, DAGGER_IDLE.z);
+  const pivot = new THREE.Group();
+  pivot.position.set(DAGGER_ARM[0], DAGGER_ARM[1], DAGGER_ARM[2]);
+  pivot.add(swing);
+  camera.add(pivot);
+  dagger = { swing, pivot, tw: { on: false, t0: 0, seg: 0, keys: null } };
+}
+
+function startDaggerAttack() {
+  if (!dagger || dagger.tw.on) return;
+  const tw = dagger.tw;
+  const j = (a) => (Math.random() - 0.5) * a;  // per-attack jitter
+  const seq = SWING_SEQS[(Math.random() * SWING_SEQS.length) | 0];
+  tw.keys = [
+    { p: DAGGER_ARM.slice(), r: [DAGGER_IDLE.x, 0, DAGGER_IDLE.z] },
+    ...seq.keys.map(k => ({
+      d: k.d, e: k.e,
+      p: [k.p[0] + j(0.06), k.p[1] + j(0.06), k.p[2] + j(0.05)],
+      r: [k.r[0] + j(0.28), k.r[1] + j(0.30), k.r[2] + j(0.28)]
+    })),
+    { d: DAGGER_RECOVER_MS, e: "out", p: DAGGER_ARM.slice(), r: [DAGGER_IDLE.x, 0, DAGGER_IDLE.z] }
+  ];
+  tw.on = true; tw.t0 = performance.now(); tw.seg = 0;
+}
+
+function updateDagger(now) {
+  const tw = dagger.tw;
+  if (!tw.on) {
+    const t = now * 0.001;
+    let dip = 0;
+    const sdt = Math.min(0.05, Math.max(0, (now - daggerDipClock) / 1000));
+    daggerDipClock = now;
+    if (moveTw.on) {  // continuous U, one full dip per two steps
+      daggerDipPhase = (daggerDipPhase + sdt * 1000 / (2 * STEP_MS)) % 1;
+      daggerDipDepth = (DAGGER_STRIDE_DIP * (1 - Math.cos(daggerDipPhase * TAU))) / 2;
+    } else if (daggerDipDepth > 1e-4) {
+      daggerDipDepth *= Math.exp(-14 * sdt);  // settle when walking stops
+    }
+    dip = daggerDipDepth;
+    dagger.pivot.position.set(
+      DAGGER_ARM[0],
+      DAGGER_ARM[1] + DAGGER_WAVE.py * Math.sin(1.7 * t) - dip,
+      DAGGER_ARM[2]
+    );
+    dagger.swing.rotation.set(  // two off-phase sines, never loops visibly
+      DAGGER_IDLE.x + DAGGER_WAVE.ax * Math.sin(DAGGER_WAVE.fx * t),
+      DAGGER_IDLE.y,
+      DAGGER_IDLE.z + DAGGER_WAVE.az * Math.sin(DAGGER_WAVE.fz * t + 1.3)
+    );
+    return;
+  }
+  const a = tw.keys[tw.seg], b = tw.keys[tw.seg + 1];
+  const t = Math.min(1, (now - tw.t0) / b.d);
+  const f = SWING_EASE[b.e](t);
+  dagger.pivot.position.set(
+    a.p[0] + (b.p[0] - a.p[0]) * f,
+    a.p[1] + (b.p[1] - a.p[1]) * f,
+    a.p[2] + (b.p[2] - a.p[2]) * f
+  );
+  dagger.swing.rotation.set(
+    a.r[0] + (b.r[0] - a.r[0]) * f,
+    a.r[1] + (b.r[1] - a.r[1]) * f,
+    a.r[2] + (b.r[2] - a.r[2]) * f
+  );
+  if (t >= 1) {
+    if (tw.seg >= tw.keys.length - 2) tw.on = false;
+    else { tw.seg += 1; tw.t0 = now; }
+  }
 }
 
 function buildTextures() {
@@ -167,6 +293,7 @@ function initScene() {
   torch.position.set(0.35, -0.35, 0.25);
   camera.add(torch);
   scene.add(camera);
+  buildDaggerViewModel();
   scene.add(new THREE.AmbientLight(0x39301f, 2.0));
   window.__scene = scene;
   if (DITHER) {
@@ -178,6 +305,8 @@ function initScene() {
         tex: { value: postRT.texture },
         aspect: { value: bufW / Math.max(1, bufH) },
         fisheye: { value: FISHEYE_K },
+        blur: { value: new THREE.Vector3(0, 0, 0) },
+        cover: { value: BLUR_COVER },
       },
       vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
       fragmentShader: [
@@ -185,6 +314,8 @@ function initScene() {
         "uniform sampler2D tex;",
         "uniform float aspect;",
         "uniform float fisheye;",
+        "uniform vec3 blur;",
+        "uniform float cover;",
         "varying vec2 vUv;",
         "const mat4 BAYER = mat4(",
         " 0.0, 8.0, 2.0, 10.0,",
@@ -194,13 +325,22 @@ function initScene() {
         "void main() {",
         "  vec2 p = vUv - 0.5;",
         "  p.x *= aspect;",
-        "  float r = length(p);",
-        "  float R = 0.5 * min(1.0, aspect);",
-        "  float q = r / max(R, 1e-5);",
-        "  vec2 pw = p / (1.0 + fisheye * q * q);",
-        "  pw.x /= aspect;",
-        "  vec2 uv = pw + 0.5;",
-        "  vec3 comp = clamp(texture2D(tex, uv).rgb, 0.0, 1.0);",
+        "  vec3 col = vec3(0.0);",
+        "  for (int i = 0; i < 5; i++) {",
+        "    float k = 0.5 + 0.5 * cover * (float(i) - 2.0) * 0.5;",
+        "    vec2 pp = p - vec2(blur.y, blur.z) * k;",
+        "    float a = blur.x * k;",
+        "    float s = sin(a);",
+        "    float c = cos(a);",
+        "    pp = vec2(c * pp.x - s * pp.y, s * pp.x + c * pp.y);",
+        "    float r = length(pp);",
+        "    float R = 0.5 * min(1.0, aspect);",
+        "    float q = r / max(R, 1e-5);",
+        "    vec2 pw = pp / (1.0 + fisheye * q * q);",
+        "    pw.x /= aspect;",
+        "    col += texture2D(tex, pw + 0.5).rgb;",
+        "  }",
+        "  vec3 comp = clamp(col * 0.2, 0.0, 1.0);",
         "  float b = BAYER[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))];",
         "  float t = (b - 7.5) / 16.0;",
         "  vec3 srg = mix(comp * 12.92, 1.055 * pow(comp, vec3(1.0/2.4)) - 0.055, step(vec3(0.0031308), comp));",
@@ -210,6 +350,7 @@ function initScene() {
       ].join("\n")
     });
     postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
+    window.__mud = { blur: postMat.uniforms.blur.value, mat: postMat, tw: moveTw };
   }
   buildArenaGeometry();
 }
@@ -561,6 +702,11 @@ function simTick() {
   stepPending = null;
   const [nx, ny] = core.moves.try_move_at(world, predPos[0], predPos[1], dx, dy, localTick).toJs();
   if ((dx !== 0 || dy !== 0) && (nx !== predPos[0] || ny !== predPos[1])) {
+    const f = FACE_DIRS[facingQuadrant()];
+    const fwd = dx * f[0] + dy * f[1];
+    const pure = mv.fw === 0 && mv.st !== 0;
+    if (pure && strafeOnset) { strafeOnset = false; moveTw.kind = 0; }  // first strafe step of a press
+    else moveTw.kind = (Math.abs(fwd) === 1 || pure) ? 1 : 0;
     moveTw.on = true; moveTw.t0 = performance.now();
     moveTw.fx = dispPos[0]; moveTw.fy = dispPos[1];
     moveTw.tx = nx; moveTw.ty = ny;
@@ -590,19 +736,38 @@ function render(now) {
     yaw = rotTw.from + (rotTw.to - rotTw.from) * e;
     if (t >= 1) { yaw = rotTw.to; rotTw.on = false; }
   }
-  let bobY = 0;
+  if (dagger) updateDagger(now);
+  let bobY = 0, pitch = 0, roll = 0;
   if (moveTw.on) {
-    const t = Math.min(1, (now - moveTw.t0) / STEP_TWEEN_MS);
+    const t = Math.min(1, (now - moveTw.t0) / STEP_MS);
     dispPos[0] = moveTw.fx + (moveTw.tx - moveTw.fx) * t;
     dispPos[1] = moveTw.fy + (moveTw.ty - moveTw.fy) * t;
-    bobY = WALK_BOB_AMP * (1 - Math.cos(t * TAU)) / 2;
+    const pump = moveTw.kind ? 0 : (1 - Math.cos(t * TAU)) / 2;
+    bobY = WALK_BOB_AMP * pump;
+    pitch = -WALK_NOD * pump;
+    roll = (mv.fw === 0 && mv.st !== 0) ? mv.st * LEAN_MAX * pump : 0;
     if (t >= 1) { dispPos[0] = moveTw.tx; dispPos[1] = moveTw.ty; moveTw.on = false; }
   } else {
     dispPos[0] += (predPos[0] - dispPos[0]) * Math.min(1, dt * 14);
     dispPos[1] += (predPos[1] - dispPos[1]) * Math.min(1, dt * 14);
   }
   camera.position.set((dispPos[0] + 0.5) * TILE_M, EYE_H + bobY, (dispPos[1] + 0.5) * TILE_M);
-  camera.rotation.set(0, yaw, 0, "YXZ");
+  camera.rotation.set(pitch, yaw, roll, "YXZ");
+  let blurRot = 0;
+  if (dt > 1e-4) {
+    const dRot = (rotTw.on ? yaw - prevYaw : 0) + (roll - prevRoll);
+    blurRot = Math.max(-0.35, Math.min(0.35, (dRot / dt) * ROT_WIN));
+  }
+  prevYaw = yaw;
+  prevRoll = roll;
+  let blurU = 0;
+  if (moveTw.on && mv.st !== 0) {
+    const spd = STEP_MS / 1000;
+    const rvx = (moveTw.tx - moveTw.fx) / spd;
+    const rvz = (moveTw.ty - moveTw.fy) / spd;
+    const dvR = rvx * Math.cos(yaw) - rvz * Math.sin(yaw);
+    blurU = -(dvR * STRAFE_WIN) / (2 * TAN_FOV * BLUR_REF_D);
+  }
   const nowTick = lastStateTick + (now - lastStateAt) / TICK_MS - INTERP_DELAY_MS / TICK_MS;
   for (const [eid, e] of known) {
     if (eid === selfId) continue;
@@ -623,6 +788,7 @@ function render(now) {
   }
   if (hudCount) hudCount.textContent = connected + " online";
   if (postRT) {
+    postMat.uniforms.blur.value.set(blurRot, blurU, 0);
     renderer.setRenderTarget(postRT);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
@@ -688,17 +854,18 @@ async function boot() {
     if (e.repeat) return;
     if (e.code === "KeyW") mv.fw = 1;
     else if (e.code === "KeyS") mv.fw = -1;
-    else if (e.code === "KeyQ") mv.st = -1;
-    else if (e.code === "KeyE") mv.st = 1;
+    else if (e.code === "KeyQ") { mv.st = -1; strafeOnset = true; }
+    else if (e.code === "KeyE") { mv.st = 1; strafeOnset = true; }
     else if (e.code === "KeyA") { turn(1); return; }
     else if (e.code === "KeyD") { turn(-1); return; }
+    else if (e.code === "KeyL") { startDaggerAttack(); return; }
     doStep();
   });
   addEventListener("keyup", (e) => {
     if (e.code === "KeyW" && mv.fw === 1) mv.fw = 0;
     else if (e.code === "KeyS" && mv.fw === -1) mv.fw = 0;
-    else if (e.code === "KeyQ" && mv.st === -1) mv.st = 0;
-    else if (e.code === "KeyE" && mv.st === 1) mv.st = 0;
+    else     if (e.code === "KeyQ" && mv.st === -1) { mv.st = 0; if (mv.fw === 0) strafeOnset = false; }
+    else if (e.code === "KeyE" && mv.st === 1) { mv.st = 0; if (mv.fw === 0) strafeOnset = false; }
   });
   requestAnimationFrame(render);
   setInterval(simTick, TICK_MS);

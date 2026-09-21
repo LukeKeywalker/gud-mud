@@ -109,5 +109,5 @@ def build(name):
     detail = ", ".join("{}: {} tris".format(p["material"], len(p["idx"]) // 3) for p in out["parts"])
     print(f"{name}: {total} tris ({detail}), {(OUT_DIR / outname).stat().st_size} bytes")
 
-build("Rat")
-build("Spider")
+for n in (sys.argv[3:] or ["Rat", "Spider"]):
+    build(n)
