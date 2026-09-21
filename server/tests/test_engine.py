@@ -126,6 +126,5 @@ def test_starter_map_integrity():
     doors = spec.codes.count(21)
     assert arches == 2 * doors
     assert doors == 31
-    assert len(spec.npcs) == 1
-    assert spec.npcs[0].id == 65000
+    assert len(spec.npcs) == 0
     assert len(spec.props) == 3

@@ -5,8 +5,10 @@ const TICK_MS = 50;
 const TILE_M = 1.0;
 const WALL_H = 3.0;
 const EYE_H = 1.6;
-const RES_H = 216;
+const RES_W = 640;
+const RES_H = 480;
 const DITHER = true;
+const TOON_STEPS = 3;   // cel-shading light bands
 const VIG = 0.55;       // vignette darkness at the screen corners
 const FRINGE = 0.008;   // max RGB channel split at the edges (fraction of screen height)
 const STEP_MS = 308;  // step period (walk slowed 1.5x); gap between steps = STEP_MS - STEP_TWEEN_MS
@@ -17,6 +19,7 @@ const ARCH_EPS = 0.01;    // band inset, keeps faces off Z-coplanar wall/floor/c
 const TILE_DOOR = 21;
 const TILE_ARCH = 22;
 const STEP_TWEEN_MS = 290;
+const ENEMY_SCALE = 2.25;  // asset base fits 0.8 m; 2.25x => ~1.8 m hulks
 const WALK_BOB_AMP = 0.05;  // head-bob height per step, Doom-style
 const ROT_TWEEN_MS = 150;
 const TAU = Math.PI * 2;
@@ -45,6 +48,7 @@ const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,
 let scene, camera, renderer, torch;
 let postRT, postCam, postScene, postMat;
 const tex = {};
+const enemyAssets = {};
 const groups = new Map();     // eid -> THREE.Group
 let hudName, hudCount, loaderEl, dieEl;
 let ws;
@@ -77,6 +81,18 @@ async function bootCore(log, setProgress) {
 }
 
 // ---------- scene ----------
+function toonGradientMap(steps) {
+  const data = new Uint8Array(steps);
+  for (let i = 0; i < steps; i++) data[i] = Math.round((i / (steps - 1)) * 255);
+  const t = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+const toonMap = toonGradientMap(TOON_STEPS);
+
 function wrapTexture(canvas) {
   const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -87,6 +103,28 @@ function wrapTexture(canvas) {
   return t;
 }
 
+async function loadEnemyAssets() {
+  try {
+    enemyAssets.rat = await (await fetch("/assets/rat.json")).json();
+    enemyAssets.spider = await (await fetch("/assets/spider.json")).json();
+  } catch (e) {
+    console.warn("enemy assets unavailable, using boxes", e);
+  }
+}
+
+function buildEnemyGroup(asset) {
+  const g = new THREE.Group();
+  for (const p of asset.parts) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(p.pos, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(p.nrm, 3));
+    if (p.idx && p.idx.length) geo.setIndex(p.idx);
+    const mat = new THREE.MeshToonMaterial({ color: new THREE.Color(p.color), gradientMap: toonMap });
+    g.add(new THREE.Mesh(geo, mat));
+  }
+  return g;
+}
+
 function buildTextures() {
   tex.wall = wrapTexture(wallStone(7));
   tex.floor = wrapTexture(floorStone(21));
@@ -94,16 +132,24 @@ function buildTextures() {
 }
 
 let bufW = 0, bufH = 0;
+let cvEl, boxW = 0, boxH = 0;
 function fitBuffer() {
-  const asp = (innerWidth > 0 && innerHeight > 0) ? innerWidth / innerHeight : 16 / 9;
-  const h = RES_H;
-  const w = Math.max(2, Math.round(h * asp));
-  if (postRT && (postRT.width !== w || postRT.height !== h)) postRT.setSize(w, h);
-  if (postMat) postMat.uniforms.aspect.value = w / h;
-  if (w === bufW && h === bufH) return;
-  bufW = w; bufH = h;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
+  const vw = innerWidth, vh = innerHeight;
+  if (vw > 0 && vh > 0) {
+    const sc = Math.min(vw / RES_W, vh / RES_H);  // letterbox the fixed 4:3 frame
+    const cw = (RES_W * sc) | 0, ch = (RES_H * sc) | 0;
+    if (cw !== boxW || ch !== boxH) {
+      cvEl.style.width = cw + "px";
+      cvEl.style.height = ch + "px";
+      boxW = cw; boxH = ch;
+    }
+  }
+  if (postRT && (postRT.width !== RES_W || postRT.height !== RES_H)) postRT.setSize(RES_W, RES_H);
+  if (postMat) postMat.uniforms.aspect.value = RES_W / RES_H;
+  if (RES_W === bufW && RES_H === bufH) return;
+  bufW = RES_W; bufH = RES_H;
+  renderer.setSize(RES_W, RES_H, false);
+  camera.aspect = RES_W / RES_H;
   camera.updateProjectionMatrix();
 }
 
@@ -113,15 +159,17 @@ function initScene() {
   scene.background = new THREE.Color(0x050505);
   scene.fog = new THREE.FogExp2(0x050505, 0.06);
   camera = new THREE.PerspectiveCamera(75, 1, 0.05, 80);
-  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: false });
+  cvEl = document.getElementById("c");
+  renderer = new THREE.WebGLRenderer({ canvas: cvEl, antialias: false });
   renderer.setPixelRatio(1);
   fitBuffer();
   addEventListener("resize", fitBuffer);
-  torch = new THREE.PointLight(0xffa64d, 70, 55, 1.45);
+  torch = new THREE.PointLight(0xffa64d, 150, 30, 2.0);
   torch.position.set(0.35, -0.35, 0.25);
   camera.add(torch);
   scene.add(camera);
   scene.add(new THREE.AmbientLight(0x39301f, 2.0));
+  window.__scene = scene;
   if (DITHER) {
     postRT = new THREE.WebGLRenderTarget(2, 2);
     postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -212,7 +260,7 @@ function buildDoorArchGeos() {
 
 function buildDoorArchMeshes(codes, w, h) {
   const { spanX, spanZ } = buildDoorArchGeos();
-  const mat = new THREE.MeshStandardMaterial({ map: tex.wall, roughness: 0.95 });
+  const mat = new THREE.MeshToonMaterial({ map: tex.wall, gradientMap: toonMap });
   const add = (geo, px, pz) => {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(px, 0, pz);
@@ -239,7 +287,7 @@ function buildArenaGeometry() {
       if (codes[y * w + x] === 0) walls.push([x, y]);
   const mesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(TILE_M, WALL_H, TILE_M),
-    new THREE.MeshStandardMaterial({ map: tex.wall, roughness: 0.95 }),
+    new THREE.MeshToonMaterial({ map: tex.wall, gradientMap: toonMap }),
     walls.length
   );
   const m = new THREE.Matrix4();
@@ -254,7 +302,7 @@ function buildArenaGeometry() {
   floorTex.repeat.set(w, h);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(w * TILE_M, h * TILE_M),
-    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1 })
+    new THREE.MeshToonMaterial({ map: floorTex, gradientMap: toonMap })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set((w * TILE_M) / 2, 0, (h * TILE_M) / 2);
@@ -263,7 +311,7 @@ function buildArenaGeometry() {
   ceilTex.repeat.set(w, h);
   const ceil = new THREE.Mesh(
     new THREE.PlaneGeometry(w * TILE_M, h * TILE_M),
-    new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 1 })
+    new THREE.MeshToonMaterial({ map: ceilTex, gradientMap: toonMap })
   );
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set((w * TILE_M) / 2, WALL_H, (h * TILE_M) / 2);
@@ -279,14 +327,23 @@ function buildArenaGeometry() {
   addWall(0.1, h * TILE_M, 0, (h * TILE_M) / 2);
   addWall(0.1, h * TILE_M, w * TILE_M, (h * TILE_M) / 2);
   const props = world.spec.props.toJs();
-  for (const pr of props) {
-    const p = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 1.0, 0.55),
-      new THREE.MeshStandardMaterial({ color: pr.kind === 1 ? 0x5a4632 : 0x606a70, roughness: 0.9 })
-    );
-    p.position.set((pr.x + 0.5) * TILE_M, 0.5, (pr.y + 0.5) * TILE_M);
-    scene.add(p);
-  }
+  props.forEach((pr, i) => {
+    const asset = enemyAssets[(i % 2 === 0) ? "rat" : "spider"];
+    const x = (pr.x + 0.5) * TILE_M, z = (pr.y + 0.5) * TILE_M;
+    if (asset) {
+      const g = buildEnemyGroup(asset);
+      g.position.set(x, 0, z);
+      g.scale.setScalar(ENEMY_SCALE);
+      scene.add(g);
+    } else {
+      const p = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 1.0, 0.55),
+        new THREE.MeshToonMaterial({ color: pr.kind === 1 ? 0x5a4632 : 0x606a70, gradientMap: toonMap })
+      );
+      p.position.set(x, 0.5, z);
+      scene.add(p);
+    }
+  });
 }
 
 function namePlate(text, color) {
@@ -311,7 +368,7 @@ function syncMesh(eid, e) {
   let g = groups.get(eid);
   if (!g) {
     g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({ color: e.color, roughness: 0.8 });
+    const mat = new THREE.MeshToonMaterial({ color: e.color, gradientMap: toonMap });
     const addBox = (bw, bh, bd, x, y, z) => {
       const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat);
       b.position.set(x, y, z);
@@ -324,7 +381,7 @@ function syncMesh(eid, e) {
     addBox(0.2, 0.6, 0.2, 0.38, 0.96, 0);
     addBox(0.46, 0.46, 0.46, 0, 1.5, 0);
     g.add(namePlate(e.name, e.color));
-    const torchLight = new THREE.PointLight(0xffa64d, 46, 20, 1.5);
+    const torchLight = new THREE.PointLight(0xffa64d, 60, 12, 2.0);
     torchLight.position.set(0, 1.45, 0);
     g.add(torchLight);
     groups.set(eid, g);
@@ -528,7 +585,7 @@ function render(now) {
   lastFrame = now;
   fitBuffer();
   const flick = 0.14 * Math.sin(now * 0.0042) + 0.07 * Math.sin(now * 0.0112) + (Math.random() - 0.5) * 0.12;
-  torch.intensity = 88 * (1 + flick);
+  torch.intensity = 150 * (1 + flick);
   if (selfId < 0) return;
   if ((mv.fw || mv.st) && !moveTw.on && now - lastStepAt >= STEP_MS) doStep();
   if (rotTw.on) {
@@ -615,6 +672,9 @@ async function boot() {
   try {
     log("booting Pyodide");
     await bootCore(log, setProgress);
+    log("loading enemy assets");
+    setProgress(0.95);
+    await loadEnemyAssets();
     log("building scene");
   } catch (err) {
     log("FAILED: " + err);

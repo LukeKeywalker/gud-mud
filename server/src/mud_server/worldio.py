@@ -4,12 +4,11 @@ from game_core import world as W
 
 
 def build_seed_spec(path: Path) -> W.WorldSpec:
-    """Parse the ASCII map and attach the default patrolling NPC (id 65000)
-    inside room A. Deterministic: no RNG anywhere in this path."""
+    """Parse the ASCII map and place the default props inside room A.
+    Deterministic: no RNG anywhere in this path."""
     text = Path(path).read_text()
     spec = W.parse_map_text(text)
     a = next(r for r in spec.rooms if r.letter == "A")
-    spec = W.add_npc(spec, W.NpcDef(65000, "warden", ((a.x + 2, a.y + 3), (a.x + 5, a.y + 3))))
     for k, (px, py) in enumerate(((a.x + 2, a.y + 5), (a.x + 4, a.y + 5), (a.x + 6, a.y + 2))):
         spec = W.add_prop(spec, W.PropDef(1, px, py))
     return spec
