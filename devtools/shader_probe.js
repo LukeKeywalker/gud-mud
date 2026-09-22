@@ -60,6 +60,7 @@ function lapsOf(img) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
+    gl.uniform1f(gl.getUniformLocation(prog, 'exposure'), mat.uniforms.exposure.value);
     gl.uniform1f(gl.getUniformLocation(prog, 'aspect'), W / H);
     gl.uniform1f(gl.getUniformLocation(prog, 'fisheye'), 0.05);
     gl.uniform1f(gl.getUniformLocation(prog, 'cover'), 0.7);
