@@ -100,7 +100,7 @@ let scene, camera, renderer, torch;
 let torchViewModel;
 let postRT, postCam, postScene, postMat;
 let hullMat, rimMat;
-let postOutlineOn = true;
+let postOutlineOn = false;
 const tex = {};
 const enemyAssets = {};
 const dungeonAssets = {};
