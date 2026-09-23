@@ -2,18 +2,19 @@ import * as THREE from './three.module.js';
 
 // Small, self-contained low-poly asset. Origin is the handle grip;
 // dimensions are metres. The flame socket also carries the real point light.
-export function createTorchViewModel() {
+export function createTorchViewModel(outline) {
   const root = new THREE.Group();
   root.name = 'held-torch';
   const wood = new THREE.MeshLambertMaterial({ color: 0x58341d });
   const grain = new THREE.MeshLambertMaterial({ color: 0x2c1a12 });
   const iron = new THREE.MeshLambertMaterial({ color: 0x373039 });
   const cloth = new THREE.MeshLambertMaterial({ color: 0x88734c });
-  const add = (geometry, material, x, y, z, parent = root) => {
+  const add = (geometry, material, x, y, z, parent = root, kind = 'viewmodel') => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
     // Like the sword, the near-camera torch cannot shadow its own light.
     mesh.castShadow = mesh.receiveShadow = false;
+    if (outline) outline(mesh, kind);
     parent.add(mesh);
     return mesh;
   };
@@ -58,10 +59,12 @@ export function createTorchViewModel() {
   };
   const geo = flameGeometry();
   const fire = color => new THREE.MeshBasicMaterial({ color: color.multiplyScalar(0.7), side: THREE.DoubleSide });
-  add(geo, fire(new THREE.Color(3.5, 0.45, 0.015)), 0, 0, 0, flame);
-  const inner = add(geo, fire(new THREE.Color(4, 1.9, 0.12)), 0.005, 0.005, 0.032, flame);
+  // The inner layers' bases sit 3 cm in front of the outer cone's rim, so
+  // the visible silhouette is a compound of all three — outline each layer.
+  add(geo, fire(new THREE.Color(3.5, 0.45, 0.015)), 0, 0, 0, flame, 'flame');
+  const inner = add(geo, fire(new THREE.Color(4, 1.9, 0.12)), 0.005, 0.005, 0.032, flame, 'flame');
   inner.scale.set(0.6, 0.74, 0.6);
-  const core = add(geo, fire(new THREE.Color(5, 3.8, 1.3)), 0.003, 0.008, 0.053, flame);
+  const core = add(geo, fire(new THREE.Color(5, 3.8, 1.3)), 0.003, 0.008, 0.053, flame, 'flame');
   core.scale.set(0.32, 0.43, 0.32);
 
   return {

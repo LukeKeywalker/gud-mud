@@ -99,6 +99,8 @@ const known = new Map();   // eid -> { x, y, room, yaw, color, name, ops: [{t,x,
 let scene, camera, renderer, torch;
 let torchViewModel;
 let postRT, postCam, postScene, postMat;
+let hullMat, rimMat;
+let postOutlineOn = true;
 const tex = {};
 const enemyAssets = {};
 const dungeonAssets = {};
@@ -156,6 +158,59 @@ function toonGradientMap(steps) {
 }
 
 const toonMap = toonGradientMap(TOON_STEPS);
+
+const OUTLINE_STEPS = [0.01, 0.03, 0.06, 0.12, 0.24, 0.5];  // expansion depth (m, asset space); V cycles
+let outlineStep = 2;
+const OUTLINE_W = OUTLINE_STEPS[outlineStep];
+// Dedicated shader (not a patched built-in): MeshBasicMaterial only declares
+// normals behind USE_DISPLACEMENTMAP, so a begin_vertex patch can't reference
+// objectNormal there. Write the hull transform out explicitly. Fills one
+// post-process rim material; the outline band is drawn in the stencil pass.
+function outlineMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {
+      outlineWidth: { value: OUTLINE_W },
+      distNearMul: { value: 3.0 },
+      distFarMul: { value: 1.0 },
+      distNear: { value: 2.0 },
+      distFar: { value: 9.0 }
+    },
+    vertexShader: [
+      "uniform float outlineWidth;",
+      "uniform float distNearMul;",
+      "uniform float distFarMul;",
+      "uniform float distNear;",
+      "uniform float distFar;",
+      // Expand the back faces outward along the object normal: only the rim
+      // outside the silhouette survives the depth test, so the body stays lit.
+      // Width scales with view distance (thicker near the player): the base
+      // modelview position gives the distance, then the normal offset is
+      // re-expanded with the scaled width. Works for plain meshes and
+      // InstancedMesh (instanceMatrix is declared in three's vertex prefix
+      // when USE_INSTANCING is set).
+      "void main() {",
+      "  #ifdef USE_INSTANCING",
+      "    vec4 mvBase = modelViewMatrix * instanceMatrix * vec4(position, 1.0);",
+      "  #else",
+      "    vec4 mvBase = modelViewMatrix * vec4(position, 1.0);",
+      "  #endif",
+      "  float w = outlineWidth * mix(distNearMul, distFarMul, smoothstep(distNear, distFar, length(mvBase.xyz)));",
+      "  vec3 transformed = position + normalize(normal) * w;",
+      "  #ifdef USE_INSTANCING",
+      "    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(transformed, 1.0);",
+      "  #else",
+      "    gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);",
+      "  #endif",
+      "}"
+    ].join("\n"),
+    fragmentShader: "void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); }"
+  });
+}
+function cycleOutlineDepth() {
+  outlineStep = (outlineStep + 1) % OUTLINE_STEPS.length;
+  if (rimMat) rimMat.uniforms.outlineWidth.value = OUTLINE_STEPS[outlineStep];
+}
 
 // Use the rendered triangles, including instanced stonework, as occluders.
 function shadowMesh(mesh, cast = true) {
@@ -236,7 +291,7 @@ function buildEnemyGroup(asset, shadows = true) {
 
 function buildSword2ViewModel() {
   if (!sword2Asset) return;
-  // The camera-space weapon must not occlude the nearby torch.
+  // The camera-space weapon must not shadow the nearby torch, so it casts nothing.
   const mesh = buildEnemyGroup(sword2Asset, false);
   mesh.scale.setScalar(SWORD2_SCALE);
   mesh.position.y = -SWORD2_GRIP;  // grip pivot at the group origin
@@ -335,6 +390,7 @@ function fitBuffer() {
     }
   }
   if (postRT && (postRT.width !== RES_W || postRT.height !== RES_H)) postRT.setSize(RES_W, RES_H);
+
   if (postMat) postMat.uniforms.aspect.value = RES_W / RES_H;
   if (RES_W === bufW && RES_H === bufH) return;
   bufW = RES_W; bufH = RES_H;
@@ -387,7 +443,7 @@ function initScene() {
   window.__scene = scene;
   if (DITHER) {
     // Preserve values above 1 until the final pass compresses the highlights.
-    postRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType });
+    postRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, stencilBuffer: true });
     postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     postScene = new THREE.Scene();
     postMat = new THREE.ShaderMaterial({
@@ -447,7 +503,48 @@ function initScene() {
       ].join("\n")
     });
     postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
-    window.__mud = { blur: postMat.uniforms.blur.value, mat: postMat, tw: moveTw };
+    // Post-process silhouette outline (N key). The stencil lives in postRT
+    // itself: pass 1 re-renders the scene with a colorless override that
+    // only writes stencil 1 across every body silhouette; pass 2 draws the
+    // shared backside hull with stencil-func NotEqual, so the expanded rim
+    // survives only OUTSIDE the silhouettes, and the depth test keeps the
+    // rim behind nearer bodies.
+    hullMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+    hullMat.colorWrite = false;
+    hullMat.depthWrite = false;
+    hullMat.polygonOffset = true;
+    hullMat.polygonOffsetFactor = -1;
+    hullMat.polygonOffsetUnits = -1;
+    hullMat.stencil = true;
+    hullMat.stencilWrite = true;
+    hullMat.stencilRef = 1;
+    hullMat.stencilFunc = THREE.AlwaysStencilFunc;
+    hullMat.stencilFuncMask = 0xff;
+    hullMat.stencilZPass = THREE.ReplaceStencilOp;
+    rimMat = outlineMaterial();
+    rimMat.polygonOffset = true;
+    rimMat.polygonOffsetFactor = -1;
+    rimMat.polygonOffsetUnits = -1;
+    rimMat.stencil = true;
+    rimMat.stencilRef = 1;
+    rimMat.stencilFunc = THREE.NotEqualStencilFunc;
+    rimMat.stencilFuncMask = 0xff;
+    window.__mud = {
+      blur: postMat.uniforms.blur.value, mat: postMat, tw: moveTw,
+      postOutlines: (on) => { postOutlineOn = !!on; },
+      outlineDepth: () => OUTLINE_STEPS[outlineStep],
+      rimDepth: (v) => { if (rimMat) rimMat.uniforms.outlineWidth.value = v; },
+      outlineWidthSet: (v) => { if (rimMat) rimMat.uniforms.outlineWidth.value = v; },
+      outlineDistance: (nearMul, farMul, nearD, farD) => {
+        if (!rimMat) return null;
+        const u = rimMat.uniforms;
+        u.distNearMul.value = nearMul;
+        u.distFarMul.value = farMul;
+        u.distNear.value = nearD;
+        u.distFar.value = farD;
+        return { rimMat: Object.fromEntries(Object.entries(u).map(([k, v]) => [k, v.value])) };
+      }
+    };
   }
   buildArenaGeometry();
 }
@@ -580,7 +677,7 @@ function buildPackWalls(codes, w, h) {
       panel.vertical ? -Math.PI / 2 : 0);
   }
   for (const [length, matrices] of batches)
-    addInstanced(cropWallPanel(dungeonAssets.wall, length * TILE_M, panelTiles * TILE_M), false, matrices);
+    addInstanced(cropWallPanel(dungeonAssets.wall, length * TILE_M, panelTiles * TILE_M), false, matrices, true);
 }
 
 function buildPackFloor(codes, w, h) {
@@ -590,7 +687,7 @@ function buildPackFloor(codes, w, h) {
       // Thin visual walls expose floor inside their blocked grid cells.
       placeMat(mats, (x + 0.5) * TILE_M, 0, (y + 0.5) * TILE_M, Math.floor(h01(x, y, 5) * 4) * (Math.PI / 2));
     }
-  // Floors receive silhouettes but need not be drawn into all six shadow faces.
+  // Floors need not be drawn into all six shadow faces.
   addInstanced(dungeonAssets.floor, false, mats, false);
 }
 
@@ -602,7 +699,7 @@ function buildPackArches(codes, w, h) {
       const hE = tileAt(codes, w, h, x - 1, y) === TILE_ARCH || tileAt(codes, w, h, x + 1, y) === TILE_ARCH;
       placeMat(mats, (x + 0.5) * TILE_M, 0, (y + 0.5) * TILE_M, hE ? 0 : Math.PI / 2);
     }
-  addInstanced(dungeonAssets.arch, false, mats);
+    addInstanced(dungeonAssets.arch, false, mats, true);
 }
 
 function roomRects(codes, w, h) {
@@ -621,7 +718,9 @@ function roomRects(codes, w, h) {
 function gridTemplate(asset, toon) {
   const geos = assetGeos(asset), mats = partMats(asset, toon);
   const g = new THREE.Group();
-  asset.parts.forEach((p, i) => g.add(shadowMesh(new THREE.Mesh(geos[i], mats[i]))));
+  asset.parts.forEach((p, i) => {
+    g.add(shadowMesh(new THREE.Mesh(geos[i], mats[i])));
+  });
   return g;
 }
 
@@ -1073,6 +1172,21 @@ function render(now) {
     postMat.uniforms.blur.value.set(blurRot, blurU, 0);
     renderer.setRenderTarget(postRT);
     renderer.render(scene, camera);
+    if (postOutlineOn) {
+      renderer.autoClear = false;
+      const bg = scene.background;
+      scene.background = null;
+      // Pass 1: stencil of every body silhouette (no color output).
+      scene.overrideMaterial = hullMat;
+      renderer.render(scene, camera);
+      // Pass 2: rim — stencil-func NotEqual keeps it outside the
+      // silhouettes; the depth test keeps it behind nearer bodies.
+      scene.overrideMaterial = rimMat;
+      renderer.render(scene, camera);
+      scene.overrideMaterial = null;
+      scene.background = bg;
+      renderer.autoClear = true;
+    }
     renderer.setRenderTarget(null);
     renderer.render(postScene, postCam);
   } else {
@@ -1142,6 +1256,8 @@ async function boot() {
     else if (e.code === "KeyA") { turn(1); return; }
     else if (e.code === "KeyD") { turn(-1); return; }
     else if (e.code === "KeyL") { startSword2Attack(); return; }
+    else if (e.code === "KeyN") { postOutlineOn = !postOutlineOn; return; }
+    else if (e.code === "KeyV") { cycleOutlineDepth(); return; }
     doStep();
   });
   addEventListener("keyup", (e) => {
